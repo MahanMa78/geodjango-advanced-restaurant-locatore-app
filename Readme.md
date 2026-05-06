@@ -301,37 +301,6 @@ python manage.py shell -c "from restaurants.models import Restaurant; print(Rest
 
 ---
 
-## Preparing for GitHub
-
-Before pushing, make sure these are in your `.gitignore`:
-
-```gitignore
-# Python
-geoenv/
-__pycache__/
-*.pyc
-*.pyo
-.env
-
-# Django
-staticfiles/
-media/
-
-# Node
-node_modules/
-dist/
-
-# OS
-.DS_Store
-Thumbs.db
-```
-
-Generate a fresh secret key for your `.env`:
-```bash
-python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
-```
-
----
 
 ## License
 
