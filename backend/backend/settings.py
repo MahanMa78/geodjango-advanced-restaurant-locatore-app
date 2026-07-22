@@ -97,9 +97,10 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.contrib.gis.db.backends.postgis',
         'NAME': os.getenv('DB_NAME', 'restaurant_locator'),
-        'USER': os.getenv('DB_USER', 'mac'),
+        'USER': os.getenv('DB_USER', 'restaurant_locator_user'),
+        "PASSWORD": os.getenv("DB_PASSWORD", "restaurant_locator_pass"),
         'HOST': os.getenv('DB_HOST', 'localhost'),
-        'PORT': os.getenv('DB_PORT', '5432'),
+        'PORT': os.getenv('DB_PORT', '5433'),
     }
 }
 
