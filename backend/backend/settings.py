@@ -96,11 +96,11 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.contrib.gis.db.backends.postgis',
-        'NAME': os.getenv('DB_NAME', 'restaurant_locator'),
-        'USER': os.getenv('DB_USER', 'restaurant_locator_user'),
-        "PASSWORD": os.getenv("DB_PASSWORD", "restaurant_locator_pass"),
-        'HOST': os.getenv('DB_HOST', 'localhost'),
-        'PORT': os.getenv('DB_PORT', '5433'),
+        'NAME': os.getenv('DB_NAME', 'mygeodb'),
+        'USER': os.getenv('DB_USER', 'myprojectuser'),
+        "PASSWORD": os.getenv("DB_PASSWORD", "mypassword"),
+        'HOST': os.getenv('DB_HOST', 'db'),
+        'PORT': os.getenv('DB_PORT', '5432'),
     }
 }
 
@@ -111,7 +111,7 @@ REST_FRAMEWORK = {
         'rest_framework.renderers.JSONRenderer',
         'rest_framework.renderers.BrowsableAPIRenderer'
     ],
-    'DEFAULT_PERSMISSION_CLASSES': [
+    'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.AllowAny',
     ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
@@ -122,15 +122,11 @@ REST_FRAMEWORK = {
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
-    "http://127.0.1:5173",
+    "http://127.0.0.1:5173",
 ]
 
-CORS_ALLOW_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.1:5173",
-]
 
-CORS_ALLOWED_ALL_ORIGINS = DEBUG
+CORS_ALLOW_ALL_ORIGINS = DEBUG
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
@@ -156,7 +152,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'Africa/Lagos'
+TIME_ZONE = 'Asia/Tehran'
 
 USE_I18N = True
 
