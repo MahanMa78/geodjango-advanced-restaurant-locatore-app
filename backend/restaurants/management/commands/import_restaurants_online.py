@@ -8,15 +8,37 @@ from restaurants.models import Restaurant, Category
 class Command(BaseCommand):
     help = 'Import real restaurants from OpenStreetMap via Overpass API'
 
+    def add_arguments(self, parser): 
+        """
+        A bounding box defines the minimum rectangular area that completely contains
+        a geographic feature, using its minimum and maximum longitude and latitude.
+        """
+        parser.add_argument(
+            '--bbox',
+            type=str,
+            default='36.24,49.95,36.32,50.08',
+            help='Bounding box: min_lat,min_lon,max_lat,max_lon',
+        )
+        parser.add_argument(
+            '--city',
+            type=str,
+            default='Qazvin, Iran',
+            help='City name for default address',
+        )
+    
     def handle(self, *args, **options):
-        self.stdout.write('Fetching restaurants from OpenStreetMap...')
+        bbox = options['bbox']
+        city_name = options['city']
+        
+        self.stdout.write('Fetching restaurants from OpenStreetMap for bbox [{bbox}]...')
 
         # Overpass query — restaurants in Lagos
-        query = """
+        query = f"""
         [out:json][timeout:30];
         (
-          node["amenity"="restaurant"](6.3,3.1,6.7,3.7);
-          node["amenity"="fast_food"](6.3,3.1,6.7,3.7);
+          node["amenity"="restaurant"]({bbox});
+          node["amenity"="fast_food"]({bbox});
+          node["amenity"="cafe"]({bbox});
         );
         out body;
         """
@@ -31,17 +53,17 @@ class Command(BaseCommand):
             timeout=60
         )
         if res.status_code != 200:
-            self.stderr.write(f'Error fetching data: {res.status_code}')
+            self.stderr.write(self.style.ERROR(f'Error fetching data: {res.status_code}'))
             self.stdout.write(res.text[:300])
             return
         try:
             data = res.json()
         except Exception:
-            self.stderr.write('Error parsing JSON response')
+            self.stderr.write(self.style.ERROR('Error parsing JSON response'))
             self.stdout.write(res.text[:300])
             return
         elements = data.get('elements', [])
-        self.stdout.write(f'Found {len(elements)} places from OSM')
+        self.stdout.write(self.style.SUCCESS(f'Found {len(elements)} places from OSM'))
 
         default_cat, _ = Category.objects.get_or_create(
             name='Restaurant', defaults={'icon': '🍽️'}
@@ -50,7 +72,7 @@ class Command(BaseCommand):
         created = 0
         for el in elements:
             tags = el.get('tags', {})
-            name = tags.get('name')
+            name = tags.get('name') or tags.get('name:fa') or tags.get('name:en')
             if not name:
                 continue  # skip unnamed places
 
@@ -59,20 +81,22 @@ class Command(BaseCommand):
             if not lat or not lon:
                 continue
 
+            street = tags.get('addr:street') or tags.get('street') or city_name
+            
             Restaurant.objects.get_or_create(
                 name=name,
                 defaults={
-                    'address':          tags.get('addr:street', 'Lagos, Nigeria'),
+                    'address':          street,
                     'location':         Point(lon, lat, srid=4326),
                     'category':         default_cat,
                     'rating':           4.0,
                     'price_range':      2,
                     'delivery_time_min': 30,
-                    'delivery_fee':     500,
-                    'minimum_order':    1000,
+                    'delivery_fee':     15000,
+                    'minimum_order':    50000,
                     'is_open':          True,
                 }
             )
             created += 1
 
-        self.stdout.write(f'✅ Imported {created} restaurants from OpenStreetMap')
+        self.stdout.write(self.style.SUCCESS(f'✅ Imported {created} restaurants from OpenStreetMap'))
