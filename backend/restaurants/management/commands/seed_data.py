@@ -1,329 +1,271 @@
 """
 Management command: python manage.py seed_data
 
-Seeds the database with sample restaurants and delivery zones in Lagos, Nigeria.
+Seeds DERIVED spatial data (delivery zones, service-area boundary) and 
+sample menu items for whatever restaurants already exist in the database 
+(typically imported via `import_restaurants_online`).
+
+USAGE EXAMPLES:
+  1. Default run (seeds missing zones/menus for all DB restaurants):
+     python manage.py seed_data
+
+  2. Seed with a custom delivery radius (e.g., 2.0 km):
+     python manage.py seed_data --radius-km 2.0
+
+  3. Filter by city and force-rebuild existing zones/menus:
+     python manage.py seed_data --city "Qazvin" --reseed
+
+DOCKER USAGE:
+  docker-compose exec web python manage.py seed_data --city "Qazvin" --reseed
+  docker-compose exec web python manage.py seed_data --radius-km 2.0
 
 GEODJANGO CONCEPTS DEMONSTRATED:
-  1. Creating Point geometries programmatically
-  2. Creating Polygon geometries (delivery zones)
-  3. Using GEOS objects to create model instances
-  4. SRID assignment
-"""
+  1. Deriving Polygon delivery zones from real Point locations
+  2. Accurate metric buffering via CRS transformation (SRID 4326 <-> 3857)
+  3. Building a MultiPolygon ServiceArea using Convex Hull geometry
+  4. Idempotent seeding (safe to re-run without creating duplicate data)
+"""   
 
-from django.core.management.base import BaseCommand
-from django.contrib.gis.geos import Point, Polygon, MultiPolygon
-
-from restaurants.models import Restaurant, Category, MenuItem
+from django.core.management.base import BaseCommand, CommandError
+from django.contrib.gis.geos import MultiPoint, MultiPolygon, Polygon
+from restaurants.models import Restaurant, MenuItem
 from zones.models import DeliveryZone, ServiceArea
 
-
+"""
+Web Mercator — good enough for short-distance buffering in meters.
+(Not accurate for polar regions or very large areas, but fine for
+city-scale delivery zones.)
+"""
+METRIC_SRID = 3857
+GEOGRAPHIC_SRID = 4326
+"""
+Generic fallback menu, used when a restaurant's category doesn't match
+a more specific template below. Keyed by Category.name so it's trivial
+to extend as import_restaurants_online starts capturing more OSM `cuisine`
+tags in the future.
+"""
+MENU_TEMPLATES = {
+    "Pizza": [
+        ("Margherita Pizza", 450000, "Main", "Classic tomato, mozzarella and basil."),
+        ("Pepperoni Pizza", 520000, "Main", "Loaded with pepperoni and extra cheese."),
+        ("Garlic Bread", 150000, "Side", "Toasted with garlic butter."),
+        ("Soft Drink", 80000, "Drinks", "Chilled can."),
+    ],
+    "Iranian": [
+        ("Chelo Kabab Koobideh", 350000, "Main", "Two skewers of minced beef, saffron rice, and grilled tomato."),
+        ("Ghormeh Sabzi", 280000, "Main", "Traditional Persian herb stew with lamb, kidney beans, and dried lime."),
+        ("Zereshk Polo ba Morgh", 290000, "Main", "Saffron rice with barberries served with tender chicken."),
+        ("Kashk-e Bademjan", 150000, "Starter", "Sautéed eggplant with kashk, caramelized onions, and mint."),
+        ("Doogh", 35000, "Drinks", "Traditional chilled mint yogurt drink."),
+    ],
+    "Italian": [
+        ("Pizza Margherita", 280000, "Main", "Classic Neapolitan pizza with tomato sauce, mozzarella, and fresh basil."),
+        ("Penne Carbonara", 310000, "Main", "Pasta with egg yolk, guanciale, pecorino cheese, and black pepper."),
+        ("Lasagna Bolognese", 330000, "Main", "Layered pasta with rich meat ragù, béchamel, and parmesan."),
+        ("Bruschetta al Pomodoro", 140000, "Starter", "Grilled garlic bread topped with fresh tomatoes, basil, and olive oil."),
+        ("Tiramisu", 120000, "Dessert", "Classic Italian coffee-flavored dessert."),
+    ],
+    # Default template — used for the generic "Restaurant"/"Fast Food"/
+    # "Cafe" categories that import_restaurants_online currently assigns.
+    "__default__": [
+        ("Chef's Special Combo", 550000, "Main", "House specialty, chef's choice."),
+        ("Grilled Chicken Plate", 420000, "Main", "Served with rice and salad."),
+        ("Fries", 120000, "Side", "Crispy golden fries."),
+        ("Soft Drink", 80000, "Drinks", "Chilled can."),
+    ],
+}
+ 
+ 
 class Command(BaseCommand):
-    help = 'Seeds the database with sample restaurants and zones in Lagos'
-    
+    help = (
+        "Seeds delivery zones, a service area, and sample menu items for "
+        "restaurants already imported by import_restaurants_online. City-agnostic: "
+        "derives every coordinate from the restaurants actually in the DB."
+    )
+ 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--city",
+            type=str,
+            default=None,
+            help=(
+                "Restrict seeding to restaurants whose address contains this "
+                "string (matches the --city value you used for import_restaurants_online). "
+                "Omit to seed derived data for every restaurant in the DB."
+            ),
+        )
+        parser.add_argument(
+            "--radius-km",
+            type=float,
+            default=1.5,
+            help="Delivery zone radius, in kilometers, around each restaurant (default: 1.5).",
+        )
+        parser.add_argument(
+            "--limit",
+            type=int,
+            default=None,
+            help="Optional cap on how many restaurants to seed (default: all matching restaurants).",
+        )
+        parser.add_argument(
+            "--reseed",
+            action="store_true",
+            help="Delete and recreate zones/menus for the selected restaurants instead of skipping ones that already have data.",
+        )
+ 
     def handle(self, *args, **options):
-        self.stdout.write('🌍 Seeding GeoDjango sample data for Lagos, Nigeria...\n')
-        
-        # Clear existing data
-        DeliveryZone.objects.all().delete()
-        MenuItem.objects.all().delete()
-        Restaurant.objects.all().delete()
-        Category.objects.all().delete()
-        ServiceArea.objects.all().delete()
-        
-        # ─────────────────────────────────────────────────────────
-        # GEODJANGO: Create categories
-        # ─────────────────────────────────────────────────────────
-        categories = {}
-        category_data = [
-            ('Nigerian', '🍲'),
-            ('Pizza', '🍕'),
-            ('Chinese', '🥡'),
-            ('Burgers', '🍔'),
-            ('Shawarma', '🌯'),
-            ('Seafood', '🦐'),
-            ('Drinks', '🥤'),
-        ]
-        for name, icon in category_data:
-            cat = Category.objects.create(name=name, icon=icon)
-            categories[name] = cat
-        
-        self.stdout.write('✅ Created categories')
-        
-        # ─────────────────────────────────────────────────────────
-        # GEODJANGO: Creating Point geometries
-        # Point(longitude, latitude) — always longitude first!
-        #
-        # These are real coordinates for Lagos landmarks.
-        # We use srid=4326 (WGS84 / GPS coordinate system)
-        # ─────────────────────────────────────────────────────────
-        restaurants_data = [
-            {
-                'name': 'Mama Cass Restaurant',
-                'description': 'Authentic Nigerian cuisine in the heart of VI. Known for egusi soup and jollof rice.',
-                'address': '2 Oba Elegushi Road, Victoria Island, Lagos',
-                'category': 'Nigerian',
-                # Point(longitude, latitude) ← note the order
-                'location': Point(3.4273, 6.4281, srid=4326),
-                'rating': 4.6,
-                'price_range': 2,
-                'delivery_time_min': 35,
-                'delivery_fee': 600,
-                'minimum_order': 2000,
-                'image_url': 'https://images.unsplash.com/photo-1567364816519-cbc9c4ffe5fb?w=400',
-            },
-            {
-                'name': 'The Place Restaurant',
-                'description': 'Popular Nigerian fast food chain. Great suya, rice dishes and fresh fish.',
-                'address': '5A Admiralty Way, Lekki Phase 1, Lagos',
-                'category': 'Nigerian',
-                'location': Point(3.5020, 6.4455, srid=4326),
-                'rating': 4.3,
-                'price_range': 2,
-                'delivery_time_min': 40,
-                'delivery_fee': 700,
-                'minimum_order': 1500,
-                'image_url': 'https://images.unsplash.com/photo-1604329760661-e71dc83f8f26?w=400',
-            },
-            {
-                'name': 'Domino\'s Pizza Ikeja',
-                'description': 'Hot, fresh pizza delivered to your door. Classic and creative toppings.',
-                'address': '18 Toyin Street, Ikeja, Lagos',
-                'category': 'Pizza',
-                'location': Point(3.3479, 6.5917, srid=4326),
-                'rating': 4.1,
-                'price_range': 2,
-                'delivery_time_min': 30,
-                'delivery_fee': 500,
-                'minimum_order': 3000,
-                'image_url': 'https://images.unsplash.com/photo-1513104890138-7c749659a591?w=400',
-            },
-            {
-                'name': 'ChiChi Chinese Restaurant',
-                'description': 'Authentic Cantonese cuisine. Dim sum, noodles, and seafood dishes.',
-                'address': '23 Awolowo Road, Ikoyi, Lagos',
-                'category': 'Chinese',
-                'location': Point(3.4396, 6.4528, srid=4326),
-                'rating': 4.4,
-                'price_range': 3,
-                'delivery_time_min': 45,
-                'delivery_fee': 1000,
-                'minimum_order': 5000,
-                'image_url': 'https://images.unsplash.com/photo-1563245372-f21724e3856d?w=400',
-            },
-            {
-                'name': 'Burger King VI',
-                'description': 'Flame-grilled burgers, crispy fries, and refreshing drinks.',
-                'address': '1005 Adeola Odeku, Victoria Island, Lagos',
-                'category': 'Burgers',
-                'location': Point(3.4251, 6.4297, srid=4326),
-                'rating': 4.0,
-                'price_range': 2,
-                'delivery_time_min': 25,
-                'delivery_fee': 500,
-                'minimum_order': 2000,
-                'image_url': 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=400',
-            },
-            {
-                'name': 'Suya Spot Surulere',
-                'description': 'Best suya in Lagos! Premium beef, chicken and ram suya grilled to perfection.',
-                'address': '7 Adeniran Ogunsanya, Surulere, Lagos',
-                'category': 'Nigerian',
-                'location': Point(3.3579, 6.5004, srid=4326),
-                'rating': 4.8,
-                'price_range': 1,
-                'delivery_time_min': 20,
-                'delivery_fee': 300,
-                'minimum_order': 1000,
-                'image_url': 'https://images.unsplash.com/photo-1544025162-d76538b2ed11?w=400',
-            },
-            {
-                'name': 'Ocean Basket',
-                'description': 'Fresh seafood from South Africa. Prawns, calamari, fish and chips.',
-                'address': 'The Palms Mall, Lekki, Lagos',
-                'category': 'Seafood',
-                'location': Point(3.4748, 6.4353, srid=4326),
-                'rating': 4.5,
-                'price_range': 3,
-                'delivery_time_min': 50,
-                'delivery_fee': 1200,
-                'minimum_order': 6000,
-                'image_url': 'https://images.unsplash.com/photo-1615141982883-c7ad0e69fd62?w=400',
-            },
-            {
-                'name': 'Mr Biggs Yaba',
-                'description': 'Nigerian fast food classic. Pies, meat pies, jollof rice, and cold drinks.',
-                'address': '2 Herbert Macaulay Way, Yaba, Lagos',
-                'category': 'Nigerian',
-                'location': Point(3.3761, 6.5041, srid=4326),
-                'rating': 3.8,
-                'price_range': 1,
-                'delivery_time_min': 25,
-                'delivery_fee': 400,
-                'minimum_order': 800,
-                'image_url': 'https://images.unsplash.com/photo-1594212699903-ec8a3eca50f5?w=400',
-            },
-            {
-                'name': 'Barcelos Lekki',
-                'description': 'South African flame-grilled chicken. Peri-peri sauces and wraps.',
-                'address': '19B Admiralty Way, Lekki Phase 1, Lagos',
-                'category': 'Burgers',
-                'location': Point(3.4989, 6.4432, srid=4326),
-                'rating': 4.2,
-                'price_range': 2,
-                'delivery_time_min': 35,
-                'delivery_fee': 800,
-                'minimum_order': 3000,
-                'image_url': 'https://images.unsplash.com/photo-1598514983318-2f64f8f4796c?w=400',
-            },
-            {
-                'name': 'Nando\'s Ikeja City Mall',
-                'description': 'Portuguese-inspired peri-peri chicken. Mild to extra hot.',
-                'address': 'Ikeja City Mall, Obafemi Awolowo Way, Ikeja',
-                'category': 'Burgers',
-                'location': Point(3.3456, 6.6024, srid=4326),
-                'rating': 4.3,
-                'price_range': 2,
-                'delivery_time_min': 30,
-                'delivery_fee': 600,
-                'minimum_order': 2500,
-                'image_url': 'https://images.unsplash.com/photo-1598514983318-2f64f8f4796c?w=400',
-            },
-        ]
-        
-        restaurants = {}
-        for data in restaurants_data:
-            cat = categories[data.pop('category')]
-            r = Restaurant.objects.create(category=cat, **data)
-            restaurants[r.name] = r
-        
-        self.stdout.write(f'✅ Created {len(restaurants)} restaurants')
-        
-        # ─────────────────────────────────────────────────────────
-        # GEODJANGO: Creating Polygon geometries (delivery zones)
-        #
-        # A Polygon is a list of coordinate tuples.
-        # IMPORTANT: The first and last coordinate must be the same
-        # to "close" the ring.
-        #
-        # Format: Polygon([(lng, lat), (lng, lat), ..., (lng, lat)])
-        # ─────────────────────────────────────────────────────────
-        
-        # Delivery zone for Mama Cass (covers Victoria Island)
-        vi_zone = Polygon([
-            (3.410, 6.420),
-            (3.450, 6.420),
-            (3.450, 6.440),
-            (3.410, 6.440),
-            (3.410, 6.420),  # ← Close the ring
-        ], srid=4326)
-        
-        DeliveryZone.objects.create(
-            name='Victoria Island Zone',
-            restaurant=restaurants['Mama Cass Restaurant'],
-            area=vi_zone,
-            delivery_fee=600,
-            min_order=2000,
-            estimated_time=30,
+        city = options["city"]
+        radius_km = options["radius_km"]
+        limit = options["limit"]
+        reseed = options["reseed"]
+ 
+        restaurants = Restaurant.objects.select_related("category").all()
+        if city:
+            restaurants = restaurants.filter(address__icontains=city)
+        if limit:
+            restaurants = restaurants[:limit]
+ 
+        if not restaurants.exists():
+            raise CommandError(
+                "No matching restaurants found. Run `import_restaurants_online` "
+                "first" + (f" for city '{city}'." if city else ".")
+            )
+ 
+        restaurants = list(restaurants)
+        label = city or f"{len(restaurants)} restaurant(s) in the database"
+        self.stdout.write(f"🌍 Seeding derived data for {label}...\n")
+ 
+        if reseed:
+            self._clear_existing(restaurants)
+ 
+        zones_created = self._seed_delivery_zones(restaurants, radius_km)
+        self._seed_service_area(restaurants, city)
+        menus_created = self._seed_menu_items(restaurants)
+ 
+        self.stdout.write(f"\n{'=' * 50}")
+        self.stdout.write(self.style.SUCCESS("✅ Done"))
+        self.stdout.write(f"{'=' * 50}")
+        self.stdout.write(f"  • {zones_created} delivery zone(s) created")
+        self.stdout.write(f"  • {menus_created} restaurant(s) received menu items")
+        self.stdout.write(f"  • {ServiceArea.objects.count()} service area(s) in total")
+ 
+    # ------------------------------------------------------------------
+    # Delivery zones
+    # ------------------------------------------------------------------
+    def _seed_delivery_zones(self, restaurants, radius_km):
+        """
+        Builds one circular delivery zone per restaurant, centered on its
+        REAL location. Unlike a naive `location.x ± 0.015`, this reprojects
+        into a metric CRS to buffer by an actual distance in meters, so the
+        zone radius is correct regardless of the city's latitude.
+        """
+        created = 0
+        for restaurant in restaurants:
+            if not restaurant.location:
+                continue
+            # With --reseed, _clear_existing() already wiped old zones, so this
+            # check simply guards default (non-reseed) runs against duplicates.
+            if DeliveryZone.objects.filter(restaurant=restaurant).exists():
+                continue
+ 
+            zone_polygon = self._buffer_point_km(restaurant.location, radius_km)
+ 
+            DeliveryZone.objects.update_or_create(
+                restaurant=restaurant,
+                defaults=dict(
+                    name=f"{restaurant.name} Delivery Zone",
+                    area=zone_polygon,
+                    # Reuse the restaurant's own figures instead of
+                    # re-hardcoding fee/minimum/time constants — they were
+                    # already set sensibly at import time.
+                    delivery_fee=restaurant.delivery_fee,
+                    min_order=restaurant.minimum_order,
+                    estimated_time=restaurant.delivery_time_min,
+                ),
+            )
+            created += 1
+ 
+        self.stdout.write(f"✅ Created/updated {created} delivery zone(s) (radius ≈ {radius_km} km)")
+        return created
+ 
+    def _buffer_point_km(self, point, radius_km) -> Polygon:
+        """Buffer a Point by `radius_km` kilometers using a metric CRS, returning a Polygon in SRID 4326."""
+        metric_point = point.clone()
+        metric_point.transform(METRIC_SRID)
+        buffered = metric_point.buffer(radius_km * 1000)  # meters
+        buffered.srid = METRIC_SRID
+        buffered.transform(GEOGRAPHIC_SRID)
+        return buffered
+ 
+    # ------------------------------------------------------------------
+    # Service area
+    # ------------------------------------------------------------------
+    def _seed_service_area(self, restaurants, city):
+        """
+        Builds a ServiceArea boundary as the convex hull of every restaurant
+        location, expanded by a small margin — instead of hand-drawn
+        mainland/island polygons for one specific city. Works for any bbox.
+        """
+        points = MultiPoint([r.location for r in restaurants if r.location], srid=GEOGRAPHIC_SRID)
+ 
+        hull = points.convex_hull
+        # convex_hull of <3 points can degrade to a Point or LineString;
+        # buffer it in metric space so we always end up with a Polygon.
+        metric_hull = hull.clone()
+        metric_hull.srid = GEOGRAPHIC_SRID
+        metric_hull.transform(METRIC_SRID)
+        margin_m = 500  # small buffer so the boundary comfortably contains every point
+        boundary_metric = metric_hull.buffer(margin_m)
+        boundary_metric.srid = METRIC_SRID
+        boundary_metric.transform(GEOGRAPHIC_SRID)
+ 
+        boundary = MultiPolygon([boundary_metric], srid=GEOGRAPHIC_SRID)
+        name = f"{city} Service Area" if city else "Service Area"
+ 
+        ServiceArea.objects.update_or_create(
+            name=name,
+            defaults=dict(boundary=boundary, is_active=True),
         )
-        
-        # Delivery zone for Suya Spot (covers Surulere)
-        surulere_zone = Polygon([
-            (3.340, 6.490),
-            (3.380, 6.490),
-            (3.380, 6.515),
-            (3.340, 6.515),
-            (3.340, 6.490),
-        ], srid=4326)
-        
-        DeliveryZone.objects.create(
-            name='Surulere Zone',
-            restaurant=restaurants['Suya Spot Surulere'],
-            area=surulere_zone,
-            delivery_fee=300,
-            min_order=1000,
-            estimated_time=20,
-        )
-        
-        # Delivery zone for Domino's Ikeja
-        ikeja_zone = Polygon([
-            (3.325, 6.575),
-            (3.375, 6.575),
-            (3.375, 6.610),
-            (3.325, 6.610),
-            (3.325, 6.575),
-        ], srid=4326)
-        
-        DeliveryZone.objects.create(
-            name='Ikeja Zone',
-            restaurant=restaurants["Domino's Pizza Ikeja"],
-            area=ikeja_zone,
-            delivery_fee=500,
-            min_order=3000,
-            estimated_time=30,
-        )
-        
-        self.stdout.write('✅ Created delivery zones')
-        
-        # ─────────────────────────────────────────────────────────
-        # GEODJANGO: MultiPolygon for Lagos service area
-        # Lagos has multiple disconnected areas (mainland + islands)
-        # ─────────────────────────────────────────────────────────
-        lagos_mainland = Polygon([
-            (3.250, 6.450),
-            (3.420, 6.450),
-            (3.420, 6.640),
-            (3.250, 6.640),
-            (3.250, 6.450),
-        ], srid=4326)
-        
-        lagos_island = Polygon([
-            (3.380, 6.400),
-            (3.520, 6.400),
-            (3.520, 6.470),
-            (3.380, 6.470),
-            (3.380, 6.400),
-        ], srid=4326)
-        
-        # MultiPolygon combines both areas
-        lagos_boundary = MultiPolygon([lagos_mainland, lagos_island], srid=4326)
-        
-        ServiceArea.objects.create(
-            name='Lagos Metropolitan Area',
-            boundary=lagos_boundary,
-            is_active=True,
-        )
-        
-        self.stdout.write('✅ Created Lagos service area (MultiPolygon)')
-        
-        # Sample menu items
-        mama_cass = restaurants['Mama Cass Restaurant']
-        MenuItem.objects.bulk_create([
-            MenuItem(restaurant=mama_cass, name='Jollof Rice + Chicken', price=2500, category='Rice Dishes', description='Party-style jollof rice with a full chicken quarter'),
-            MenuItem(restaurant=mama_cass, name='Egusi Soup + Eba', price=2200, category='Soups', description='Rich egusi soup with stockfish and assorted meat, served with eba'),
-            MenuItem(restaurant=mama_cass, name='Pounded Yam + Ofe Oha', price=2800, category='Soups', description='Smooth pounded yam with Oha leaf soup'),
-            MenuItem(restaurant=mama_cass, name='Banga Soup + Starch', price=2400, category='Soups', description='Creamy banga soup with catfish and orishirishi'),
-            MenuItem(restaurant=mama_cass, name='Moi Moi + Akara', price=1200, category='Sides', description='Steamed bean pudding with fried bean cakes'),
-            MenuItem(restaurant=mama_cass, name='Chapman', price=800, category='Drinks', description='Nigerian cocktail with Fanta, Sprite, grenadine and cucumber'),
-        ])
-        
-        suya_spot = restaurants['Suya Spot Surulere']
-        MenuItem.objects.bulk_create([
-            MenuItem(restaurant=suya_spot, name='Beef Suya (200g)', price=1500, category='Suya', description='Premium beef marinated in suya spice blend, grilled over open fire'),
-            MenuItem(restaurant=suya_spot, name='Chicken Suya (300g)', price=1800, category='Suya', description='Juicy chicken pieces grilled to perfection with suya spice'),
-            MenuItem(restaurant=suya_spot, name='Ram Suya (200g)', price=2000, category='Suya', description='Special cut ram meat, extra tender and flavorful'),
-            MenuItem(restaurant=suya_spot, name='Gizzard Suya', price=1200, category='Suya', description='Crispy chicken gizzard suya'),
-            MenuItem(restaurant=suya_spot, name='Zobo Drink', price=500, category='Drinks', description='Cold hibiscus drink with ginger and pineapple flavor'),
-        ])
-        
-        self.stdout.write(f'\n{"="*50}')
-        self.stdout.write('✅ Database seeded successfully!')
-        self.stdout.write(f'{"="*50}\n')
-        self.stdout.write('📍 Summary:')
-        self.stdout.write(f'  • {Restaurant.objects.count()} restaurants (PointField locations in Lagos)')
-        self.stdout.write(f'  • {DeliveryZone.objects.count()} delivery zones (PolygonField areas)')
-        self.stdout.write(f'  • {ServiceArea.objects.count()} service area (MultiPolygonField)')
-        self.stdout.write(f'  • {MenuItem.objects.count()} menu items')
-        self.stdout.write('\n🗺️  Test the API:')
-        self.stdout.write('  Nearby search: GET /api/restaurants/nearby/?lat=6.44&lng=3.42&radius=5')
-        self.stdout.write('  Zone check:    GET /api/zones/check/?lat=6.43&lng=3.42')
-        self.stdout.write('  All zones:     GET /api/zones/')
+        self.stdout.write(f"✅ Created/updated service area '{name}' (convex hull of {len(points)} restaurant locations)")
+ 
+    # ------------------------------------------------------------------
+    # Menu items
+    # ------------------------------------------------------------------
+    def _seed_menu_items(self, restaurants):
+        """
+        Adds a small sample menu to any restaurant that doesn't already have
+        one. Template is picked by Category.name, falling back to a generic
+        template — this is intentionally the extension point for when
+        import_restaurants_online starts mapping OSM `cuisine` tags to more
+        specific categories.
+        """
+        seeded = 0
+        for restaurant in restaurants:
+            if MenuItem.objects.filter(restaurant=restaurant).exists():
+                continue  # idempotent: don't duplicate menus on re-run
+ 
+            category_name = restaurant.category.name if restaurant.category else None
+            template = MENU_TEMPLATES.get(category_name, MENU_TEMPLATES["__default__"])
+ 
+            MenuItem.objects.bulk_create(
+                [
+                    MenuItem(
+                        restaurant=restaurant,
+                        name=name,
+                        price=price,
+                        category=item_category,
+                        description=description,
+                    )
+                    for name, price, item_category, description in template
+                ]
+            )
+            seeded += 1
+ 
+        self.stdout.write(f"✅ Seeded menu items for {seeded} restaurant(s)")
+        return seeded
+ 
+    # ------------------------------------------------------------------
+    def _clear_existing(self, restaurants):
+        """Used with --reseed to force a clean rebuild for the selected restaurants only."""
+        DeliveryZone.objects.filter(restaurant__in=restaurants).delete()
+        MenuItem.objects.filter(restaurant__in=restaurants).delete()
+        self.stdout.write("🧹 Cleared existing zones/menus for selected restaurants (--reseed)")

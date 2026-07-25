@@ -1,4 +1,4 @@
-# restaurants/management/commands/import_osm_restaurants.py
+# restaurants/management/commands/import_restaurants_online.py
 
 import requests
 from django.core.management.base import BaseCommand
