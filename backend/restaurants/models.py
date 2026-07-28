@@ -17,7 +17,7 @@ from django.core.validators import MinValueValidator, MaxValueValidator
 
 
 class Category(models.Model):
-    """Restaurant category (e.g., "Nigerian", "Pizza", "Chinese")"""
+    """Restaurant category (e.g., "Fast Food", "Pizza", "Iranian")"""
     name = models.CharField(max_length=50)
     icon = models.CharField(max_length=10, default='🍽️')  # emoji icon
     
@@ -57,7 +57,7 @@ class Restaurant(models.Model):
     # ─────────────────────────────────────────────────────────────
     location = models.PointField(
         srid=4326,
-        geography=True,   # Enables geodetic (spherical) calculations
+        geography=True,
         help_text='Click the map to set restaurant location'
     )
     
@@ -67,13 +67,13 @@ class Restaurant(models.Model):
         validators=[MinValueValidator(1.0), MaxValueValidator(5.0)]
     )
     price_range = models.IntegerField(
-        choices=[(1, '₦'), (2, '₦₦'), (3, '₦₦₦')],
+        choices=[(1, '$'), (2, '$$'), (3, '$$$')],
         default=2
     )
     
     delivery_time_min = models.IntegerField(default=30, help_text='Minutes')
-    delivery_fee = models.DecimalField(max_digits=8, decimal_places=2, default=500)
-    minimum_order = models.DecimalField(max_digits=8, decimal_places=2, default=1000)
+    delivery_fee = models.DecimalField(max_digits=12, decimal_places=2, default=15000)
+    minimum_order = models.DecimalField(max_digits=12, decimal_places=2, default=50000)
     
     is_open = models.BooleanField(default=True)
     is_featured = models.BooleanField(default=False)
@@ -108,7 +108,7 @@ class MenuItem(models.Model):
     )
     name = models.CharField(max_length=150)
     description = models.TextField(blank=True)
-    price = models.DecimalField(max_digits=8, decimal_places=2)
+    price = models.DecimalField(max_digits=12, decimal_places=2)
     category = models.CharField(max_length=50, default='Main')
     is_available = models.BooleanField(default=True)
     image_url = models.URLField(blank=True)
