@@ -7,8 +7,7 @@ Delivery zones are the perfect use case for PolygonField.
 They demonstrate:
   - Storing polygon geometry (area shapes)
   - contains() lookup — is this user point inside this zone?
-  - intersects() lookup — do two zones overlap?
-  - Area calculations
+  - Transform CRS projection for metric area calculations (SRID 3857)
 """
 
 from django.contrib.gis.db import models
@@ -19,20 +18,6 @@ class DeliveryZone(models.Model):
     A delivery zone is a polygon area within which a restaurant delivers.
     
     GEODJANGO: PolygonField stores a closed polygon geometry.
-    
-    A Polygon in GeoJSON:
-    {
-      "type": "Polygon",
-      "coordinates": [
-        [
-          [3.35, 6.50],   ← First and last point must be the same
-          [3.40, 6.50],   (to "close" the polygon)
-          [3.40, 6.55],
-          [3.35, 6.55],
-          [3.35, 6.50]   ← Same as first point
-        ]
-      ]
-    }
     """
     
     name = models.CharField(max_length=100)
@@ -53,8 +38,8 @@ class DeliveryZone(models.Model):
         help_text='Draw the delivery zone boundary on the map'
     )
     
-    delivery_fee = models.DecimalField(max_digits=8, decimal_places=2, default=500)
-    min_order = models.DecimalField(max_digits=8, decimal_places=2, default=1000)
+    delivery_fee = models.DecimalField(max_digits=12, decimal_places=2, default=15000)
+    min_order = models.DecimalField(max_digits=12, decimal_places=2, default=50000)
     estimated_time = models.IntegerField(default=30, help_text='Minutes')
     is_active = models.BooleanField(default=True)
     
@@ -71,23 +56,19 @@ class DeliveryZone(models.Model):
         """
         Calculate zone area in square kilometers.
         
-        GEODJANGO: Transform to a projected CRS for accurate area.
-        SRID 32632 (UTM Zone 32N) is metric, good for West Africa.
+        GEODJANGO: Transform to Web Mercator (SRID 3857) projection for metric measurement.
         """
         if self.area:
             # Transform to metric projection for accurate measurement
-            projected = self.area.transform(32632, clone=True)
+            projected = self.area.transform(3857, clone=True)
             return round(projected.area / 1_000_000, 2)  # m² to km²
         return None
 
 
 class ServiceArea(models.Model):
     """
-    A broader service area — the city/region where NearMe operates.
-    Demonstrates MultiPolygonField for complex shapes (e.g., cities with islands).
-    
-    GEODJANGO: MultiPolygonField stores multiple polygons as one geometry.
-    Example: Lagos, Nigeria — includes the mainland AND Victoria Island.
+    A broader service area — the city/region boundary where the service operates.
+    Demonstrates MultiPolygonField for complex city boundaries.
     """
     
     name = models.CharField(max_length=100)
