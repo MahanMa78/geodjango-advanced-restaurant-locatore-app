@@ -26,7 +26,7 @@ import type {
 } from './types';
 
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: 'http://localhost:8000/api',
   headers: { 'Content-Type': 'application/json' },
 });
 
