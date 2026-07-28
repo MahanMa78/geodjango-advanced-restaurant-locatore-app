@@ -8,7 +8,7 @@ import {
 import L, { type PathOptions } from 'leaflet';
 import type { GeoJsonObject } from 'geojson';
 
-import { fetchNearby, fetchRestaurant, fetchCategories, fetchZones, checkZone  } from '../api';
+import { fetchNearby, fetchRestaurant, fetchCategories, fetchZones, checkZone } from '../api';
 import type {
   Restaurant, RestaurantDetail, Category, DeliveryZone,
   LatLng, GeoJSONFeature, MapClickHandlerProps, MapControllerProps,
@@ -17,7 +17,6 @@ import RestaurantSidebar from './RestaurantSidebar';
 import DetailPanel from './DetailPanel';
 
 // Fix Leaflet default icon in Vite
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
@@ -44,7 +43,7 @@ function makeRestaurantIcon(selected: boolean, open: boolean): L.DivIcon {
 
 // ── Constants ──────────────────────────────────────────────
 
-const LAGOS_CENTER: [number, number] = [6.5244, 3.3792];
+const DEFAULT_CENTER: LatLng = { lat: 36.27, lng: 50.00 };
 const DEFAULT_RADIUS = 5;
 
 // ── Inner map components ───────────────────────────────────
@@ -56,19 +55,29 @@ function MapClickHandler({ onMapClick }: MapClickHandlerProps): null {
 
 function MapController({ userLocation }: MapControllerProps): null {
   const map = useMap();
+  const prevLoc = useRef<LatLng | null>(null);
+
   useEffect(() => {
-    if (userLocation) map.flyTo([userLocation.lat, userLocation.lng], 13, { duration: 1.2 });
+    if (
+      userLocation &&
+      (!prevLoc.current ||
+        prevLoc.current.lat !== userLocation.lat ||
+        prevLoc.current.lng !== userLocation.lng)
+    ) {
+      prevLoc.current = userLocation;
+      map.flyTo([userLocation.lat, userLocation.lng], 13, { duration: 1 });
+    }
   }, [userLocation, map]);
   return null;
 }
 
 const zoneStyle = (): PathOptions => ({ fillColor: '#E8420A', fillOpacity: 0.07, color: '#E8420A', weight: 1.5, dashArray: '5,4' });
-const activeZoneStyle = (): PathOptions => ({ fillColor: '#2563EB', fillOpacity: 0.14, color: '#2563EB', weight: 2 });
+const activeZoneStyle = (): PathOptions => ({ fillColor: '#2563EB', fillOpacity: 0.03, stroke: false});
 
 // ── MapView ────────────────────────────────────────────────
 
 export default function MapView(): ReactNode {
-  const [userLocation, setUserLocation]       = useState<LatLng>({ lat: 6.5244, lng: 3.3792 });
+  const [userLocation, setUserLocation]       = useState<LatLng>(DEFAULT_CENTER);
   const [restaurants,  setRestaurants]         = useState<Restaurant[]>([]);
   const [selected,     setSelected]            = useState<Restaurant | null>(null);
   const [detail,       setDetail]              = useState<RestaurantDetail | null>(null);
@@ -83,23 +92,48 @@ export default function MapView(): ReactNode {
   const [showRadius,   setShowRadius]          = useState<boolean>(true);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Auto detect location safely on mount
+  useEffect(() => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const newLat = Number(pos.coords.latitude.toFixed(6));
+          const newLng = Number(pos.coords.longitude.toFixed(6));
+          setUserLocation({ lat: newLat, lng: newLng });
+        },
+        (error) => {
+          console.warn('Geolocation failed or denied:', error);
+        },
+        { timeout: 10000, maximumAge: 60000 }
+      );
+    }
+  }, []);
+
   useEffect(() => { fetchCategories().then(setCategories).catch(console.error); }, []);
   useEffect(() => { if (showZones) fetchZones().then(setZones).catch(console.error); }, [showZones]);
 
   useEffect(() => {
+    let isMounted = true;
     setLoading(true);
+
     fetchNearby({ lat: userLocation.lat, lng: userLocation.lng, radius, category: activeCategory })
       .then((data) => {
+        if (!isMounted) return;
         const filtered = searchTerm ? data.filter(r => r.name?.toLowerCase().includes(searchTerm.toLowerCase())) : data;
         setRestaurants(filtered);
       })
       .catch(console.error)
-      .finally(() => setLoading(false));
+      .finally(() => { if (isMounted) setLoading(false); });
 
     checkZone({ lat: userLocation.lat, lng: userLocation.lng })
-      .then(r => setUserZones((r.rawZones?.features as GeoJSONFeature[] | undefined) ?? []))
+      .then(r => {
+        if (!isMounted) return;
+        setUserZones((r.rawZones?.features as GeoJSONFeature[] | undefined) ?? []);
+      })
       .catch(console.error);
-  }, [userLocation, radius, activeCategory]);
+
+    return () => { isMounted = false; };
+  }, [userLocation.lat, userLocation.lng, radius, activeCategory]); // دقت: مقادیر دکانستراکت شده برای جلوگیری از چرخه نهایی
 
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
@@ -110,7 +144,7 @@ export default function MapView(): ReactNode {
           setRestaurants(filtered);
         });
     }, 300);
-  }, [searchTerm]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchTerm]);
 
   useEffect(() => {
     if (!selected) { setDetail(null); return; }
@@ -118,7 +152,12 @@ export default function MapView(): ReactNode {
   }, [selected]);
 
   const handleMapClick = useCallback((latlng: LatLng) => {
-    setUserLocation(latlng); setSelected(null); setDetail(null);
+    setUserLocation({
+      lat: Number(latlng.lat.toFixed(6)),
+      lng: Number(latlng.lng.toFixed(6)),
+    });
+    setSelected(null);
+    setDetail(null);
   }, []);
 
   const handleRestaurantClick = useCallback((r: Restaurant) => {
@@ -126,9 +165,19 @@ export default function MapView(): ReactNode {
   }, []);
 
   const handleLocateMe = useCallback(() => {
-    navigator.geolocation?.getCurrentPosition(
-      pos => setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-      () => alert('Could not get your location')
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your browser');
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        setUserLocation({
+          lat: Number(pos.coords.latitude.toFixed(6)),
+          lng: Number(pos.coords.longitude.toFixed(6)),
+        });
+      },
+      (err) => alert(`Could not get location: ${err.message}`),
+      { enableHighAccuracy: true, timeout: 5000 }
     );
   }, []);
 
@@ -146,7 +195,7 @@ export default function MapView(): ReactNode {
       {/* ── Map area ── */}
       <div className="relative flex-1 overflow-hidden">
         <MapContainer
-          center={LAGOS_CENTER} zoom={12}
+          center={[DEFAULT_CENTER.lat, DEFAULT_CENTER.lng]} zoom={13}
           style={{ width: '100%', height: '100%' }}
           zoomControl={false}
         >
@@ -179,19 +228,19 @@ export default function MapView(): ReactNode {
           {/* Delivery zone polygons */}
           {showZones && zones.map(zone => (
             <GeoJSON
-              key={zone.id}
+              key={`zone-${zone.id}`}
               data={{ type: 'Feature', geometry: zone.geometry, properties: zone } as unknown as GeoJsonObject}
               style={zoneStyle}
               onEachFeature={(feature, layer) => {
                 const p = feature.properties as DeliveryZone;
-                layer.bindTooltip(`<b>${p.name}</b><br/>${p.restaurant_name ?? ''}<br/>₦${p.delivery_fee} delivery`, { sticky: true });
+                layer.bindTooltip(`<b>${p.name}</b><br/>${p.restaurant_name ?? ''}<br/>${p.delivery_fee} delivery`, { sticky: true });
               }}
             />
           ))}
 
           {/* User active zones */}
           {userZones.map((f, i) => (
-            <GeoJSON key={`uz-${i}`} data={f as unknown as GeoJsonObject} style={activeZoneStyle} />
+            <GeoJSON key={`uz-${f.id ?? i}`} data={f as unknown as GeoJsonObject} style={activeZoneStyle} />
           ))}
 
           {/* Restaurant markers */}
@@ -213,7 +262,7 @@ export default function MapView(): ReactNode {
                       <span className="text-[11px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">📍 {r.distance_km} km</span>
                     )}
                   </div>
-                  <p className="text-xs text-ink-muted mb-2.5">🕐 {r.delivery_time_min} min · ₦{r.delivery_fee} delivery</p>
+                  <p className="text-xs text-ink-muted mb-2.5">🕐 {r.delivery_time_min} min · {r.delivery_fee} delivery</p>
                   <button
                     onClick={() => handleRestaurantClick(r)}
                     className="w-full py-1.5 bg-brand text-white text-xs font-semibold rounded-lg cursor-pointer border-0 hover:opacity-90 transition-opacity"
