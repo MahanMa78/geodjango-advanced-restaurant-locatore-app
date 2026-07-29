@@ -13,9 +13,11 @@ GEODJANGO CONCEPTS DEMONSTRATED:
 from django.contrib.gis.geos import Point
 from django.contrib.gis.measure import D
 from django.contrib.gis.db.models.functions import Distance
+from django.shortcuts import get_object_or_404
+
 
 from rest_framework import viewsets, status
-from rest_framework.decorators import action
+from rest_framework.decorators import action , api_view
 from rest_framework.response import Response
 
 
@@ -27,7 +29,7 @@ from .serializers import (
     CategorySerializer,
     MenuItemSerializer,
 )
-
+from .services import OSRMRoutingService
 
 class RestaurantViewSet(viewsets.ModelViewSet):
     """
@@ -235,3 +237,46 @@ class MenuItemViewSet(viewsets.ModelViewSet):
         return MenuItem.objects.filter(
             restaurant_id=self.kwargs['restaurant_pk']
         )
+        
+        
+@api_view(['GET'])
+def restaurant_route(request, pk):
+    """
+    Calculate real road-network route from user location to a specific restaurant.
+    Query params required: ?user_lat=...&user_lng=...
+    """
+    user_lat = request.query_params.get('user_lat')
+    user_lng = request.query_params.get('user_lng')
+
+    if not user_lat or not user_lng:
+        return Response(
+            {'error': 'user_lat and user_lng query parameters are required.'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        user_lat = float(user_lat)
+        user_lng = float(user_lng)
+    except ValueError:
+        return Response({'error': 'Invalid coordinates'}, status=status.HTTP_400_BAD_REQUEST)
+
+    restaurant = get_object_or_404(Restaurant, pk=pk)
+
+    # فراخوانی سرویس مسیریابی (مبدأ: کاربر | مقصد: رستوران)
+    route_result = OSRMRoutingService.get_route(
+        start_lng=user_lng,
+        start_lat=user_lat,
+        end_lng=restaurant.longitude,
+        end_lat=restaurant.latitude
+    )
+
+    if not route_result['success']:
+        return Response({'error': route_result['error']}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    return Response({
+        'restaurant_id': restaurant.id,
+        'restaurant_name': restaurant.name,
+        'distance_km': route_result['distance_km'],
+        'duration_minutes': route_result['duration_minutes'],
+        'route_geometry': route_result['geojson']  # GeoJSON LineString
+    })
