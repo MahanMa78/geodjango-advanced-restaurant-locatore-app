@@ -88,7 +88,7 @@ export default function MapView(): ReactNode {
   const [radius,       setRadius]              = useState<number>(DEFAULT_RADIUS);
   const [searchTerm,   setSearchTerm]          = useState<string>('');
   const [loading,      setLoading]             = useState<boolean>(false);
-  const [showZones,    setShowZones]           = useState<boolean>(true);
+  const [showZones,    setShowZones]           = useState<boolean>(false);
   const [showRadius,   setShowRadius]          = useState<boolean>(true);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [routeData, setRouteData] = useState<RouteResponse | null>(null);
@@ -110,8 +110,15 @@ export default function MapView(): ReactNode {
   }, []);
 
   useEffect(() => { fetchCategories().then(setCategories).catch(console.error); }, []);
-  useEffect(() => { if (showZones) fetchZones().then(setZones).catch(console.error); }, [showZones]);
+  useEffect(() => { 
+    if (showZones) {
 
+    fetchZones().then(setZones).catch(console.error);
+  } else {
+    setZones([]);
+  }
+  }, [showZones]);
+    
   useEffect(() => {
     let isMounted = true;
     setLoading(true);
@@ -266,7 +273,7 @@ export default function MapView(): ReactNode {
           ))}
 
           {/* User active zones */}
-          {userZones.map((f, i) => (
+          {showZones && userZones.map((f, i) => (
             <GeoJSON key={`uz-${f.id ?? i}`} data={f as unknown as GeoJsonObject} style={activeZoneStyle} />
           ))}
 
@@ -333,7 +340,7 @@ export default function MapView(): ReactNode {
         </div>
 
         {/* Zone indicator badge */}
-        {userZones.length > 0 && (
+        {showZones && userZones.length > 0 && (
           <div className="absolute top-4 left-4 z-[1000] bg-white border border-edge rounded-xl px-3.5 py-3 shadow-card max-w-[220px]">
             <p className="text-[10px] font-semibold uppercase tracking-widest text-ink-faint mb-1.5">
               📦 In a delivery zone
