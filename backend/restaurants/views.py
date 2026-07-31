@@ -262,12 +262,15 @@ def restaurant_route(request, pk):
 
     restaurant = get_object_or_404(Restaurant, pk=pk)
 
-    # فراخوانی سرویس مسیریابی (مبدأ: کاربر | مقصد: رستوران)
+    """
+    We need to start the route from the restaurant,
+    and the endpoint should be the user's location.
+    """
     route_result = OSRMRoutingService.get_route(
-        start_lng=user_lng,
-        start_lat=user_lat,
-        end_lng=restaurant.longitude,
-        end_lat=restaurant.latitude
+        start_lng=restaurant.longitude,
+        start_lat=restaurant.latitude,
+        end_lng=user_lng,
+        end_lat=user_lat
     )
 
     if not route_result['success']:
