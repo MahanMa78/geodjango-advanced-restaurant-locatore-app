@@ -133,6 +133,34 @@ export async function fetchInBbox({
   return parseRestaurantCollection(res.data);
 }
 
+// ─── Routing interfaces & endpoint ───────────────────────────────────────────
+
+export interface RouteResponse {
+  restaurant_id: number;
+  restaurant_name: string;
+  distance_km: number;
+  duration_minutes: number;
+  route_geometry: {
+    type: 'LineString';
+    coordinates: [number, number][]; // [longitude, latitude]
+  };
+}
+
+/**
+ * GET /api/restaurants/:id/route/?user_lat=&user_lng=
+ * Fetches real OSRM road route geometry between user and restaurant.
+ */
+export async function fetchRoute(
+  restaurantId: number,
+  userLat: number,
+  userLng: number
+): Promise<RouteResponse> {
+  const res = await api.get<RouteResponse>(`/restaurants/${restaurantId}/route/`, {
+    params: { user_lat: userLat, user_lng: userLng },
+  });
+  return res.data;
+}
+
 // ─── Category endpoints ───────────────────────────────────────────────────────
 
 export async function fetchCategories(): Promise<Category[]> {

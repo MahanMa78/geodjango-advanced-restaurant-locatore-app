@@ -3,12 +3,12 @@ import {
 } from 'react';
 import {
   MapContainer, TileLayer, Marker, Popup, Circle,
-  GeoJSON, useMap, useMapEvents,
+  GeoJSON, Polyline, useMap, useMapEvents,
 } from 'react-leaflet';
 import L, { type PathOptions } from 'leaflet';
 import type { GeoJsonObject } from 'geojson';
 
-import { fetchNearby, fetchRestaurant, fetchCategories, fetchZones, checkZone } from '../api';
+import { fetchNearby, fetchRestaurant, fetchCategories, fetchZones, checkZone , fetchRoute} from '../api';
 import type {
   Restaurant, RestaurantDetail, Category, DeliveryZone,
   LatLng, GeoJSONFeature, MapClickHandlerProps, MapControllerProps,
@@ -91,7 +91,7 @@ export default function MapView(): ReactNode {
   const [showZones,    setShowZones]           = useState<boolean>(true);
   const [showRadius,   setShowRadius]          = useState<boolean>(true);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
+  const [routeData, setRouteData] = useState<RouteResponse | null>(null);
   // Auto detect location safely on mount
   useEffect(() => {
     if (navigator.geolocation) {
@@ -151,6 +151,16 @@ export default function MapView(): ReactNode {
     fetchRestaurant(selected.id).then(setDetail).catch(console.error);
   }, [selected]);
 
+  useEffect(() => {
+    if (!selected || !userLocation) {
+      setRouteData(null);
+      return;
+    }
+    fetchRoute(selected.id, userLocation.lat, userLocation.lng)
+      .then(setRouteData)
+      .catch(console.error);
+  }, [selected, userLocation.lat, userLocation.lng]);
+
   const handleMapClick = useCallback((latlng: LatLng) => {
     setUserLocation({
       lat: Number(latlng.lat.toFixed(6)),
@@ -158,6 +168,7 @@ export default function MapView(): ReactNode {
     });
     setSelected(null);
     setDetail(null);
+    setRouteData(null);
   }, []);
 
   const handleRestaurantClick = useCallback((r: Restaurant) => {
@@ -223,6 +234,22 @@ export default function MapView(): ReactNode {
               radius={radius * 1000}
               pathOptions={{ color: '#2563EB', fillColor: '#2563EB', fillOpacity: 0.04, weight: 1.5, dashArray: '6,4' }}
             />
+          )}  
+
+
+          {routeData?.route_geometry?.coordinates && (
+            <Polyline
+              positions={routeData.route_geometry.coordinates.map(
+                (coord) => [coord[1], coord[0]] 
+              )}
+              pathOptions={{
+                color: '#8B5CF6',   
+                weight: 5,           
+                opacity: 0.85,
+                lineCap: 'round',
+                lineJoin: 'round',
+              }}
+            />
           )}
 
           {/* Delivery zone polygons */}
@@ -253,9 +280,14 @@ export default function MapView(): ReactNode {
             >
               <Popup>
                 <div className="p-3 min-w-[180px]">
-                  <p className="font-bold text-sm text-ink mb-2 leading-snug" style={{ fontFamily: 'Syne, sans-serif' }}>
-                    {r.name}
-                  </p>
+                  <p className="font-bold text-sm text-ink mb-2 leading-snug">{r.name}</p>
+                  {selected?.id === r.id && routeData && (
+                    <div className="bg-purple-50 text-purple-700 p-2 rounded-lg text-xs mb-2 border border-purple-200">
+                      <p className="font-semibold">🛣️ مسیریابی خیابانی:</p>
+                      <p>مسافت: <strong>{routeData.distance_km} کیلومتر</strong></p>
+                      <p>زمان تخمینی: <strong>{routeData.duration_minutes} دقیقه</strong></p>
+                    </div>
+                  )}
                   <div className="flex gap-1.5 flex-wrap mb-2">
                     <span className="text-[11px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded">⭐ {r.rating}</span>
                     {r.distance_km != null && (

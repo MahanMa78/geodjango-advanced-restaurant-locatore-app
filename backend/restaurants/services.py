@@ -9,7 +9,8 @@ class OSRMRoutingService:
     Service helper to fetch real road-network routing data from OSRM engine.
     """
 
-    OSRM_BASE_URL = "http://router.project-osrm.org/route/v1/driving"
+    # OSRM_BASE_URL = "http://router.project-osrm.org/route/v1/driving"
+    OSRM_BASE_URL = "https://routing.openstreetmap.de/routed-car/route/v1/driving"
 
     @classmethod
     def get_route(cls, start_lng: float, start_lat: float, end_lng: float, end_lat: float):
@@ -22,9 +23,11 @@ class OSRMRoutingService:
             'overview': 'full',
             'geometries': 'geojson'
         }
-
+        headers = {
+            'User-Agent': 'WebGIS-Demo-App/1.0'
+        }
         try:
-            response = requests.get(url, params=params, timeout=5)
+            response = requests.get(url, params=params,headers=headers, timeout=10, )
             if response.status_code == 200:
                 data = response.json()
                 if data.get('code') == 'Ok' and len(data.get('routes', [])) > 0:
