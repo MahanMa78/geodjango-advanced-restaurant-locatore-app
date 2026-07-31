@@ -19,7 +19,7 @@ from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, status
 from rest_framework.decorators import action , api_view
 from rest_framework.response import Response
-
+from rest_framework.views import APIView
 
 from .models import Restaurant, Category, MenuItem
 from .serializers import (
@@ -30,6 +30,8 @@ from .serializers import (
     MenuItemSerializer,
 )
 from .services import OSRMRoutingService
+from .pricing_service import DynamicPricingService
+
 
 class RestaurantViewSet(viewsets.ModelViewSet):
     """
@@ -283,3 +285,58 @@ def restaurant_route(request, pk):
         'duration_minutes': route_result['duration_minutes'],
         'route_geometry': route_result['geojson']  # GeoJSON LineString
     })
+
+class RestaurantRouteView(APIView):
+    """
+    GET /api/restaurants/<id>/route/?user_lat=&user_lng=
+    OSRM Route Calculation and Dynamic Delivery Pricing
+    """
+    def get(self, request, pk):
+        user_lat = request.query_params.get('user_lat')
+        user_lng = request.query_params.get('user_lng')
+
+        if not user_lat or not user_lng:
+            return Response(
+                {"error": "The user_lat and user_lng parameters are required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            user_lat = float(user_lat)
+            user_lng = float(user_lng)
+        except ValueError:
+            return Response(
+                {"error": "The input coordinates are invalid."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        restaurant = get_object_or_404(Restaurant, pk=pk)
+
+        # Get OSRM route (Origin: Restaurant | Destination: User)
+        route_result = OSRMRoutingService.get_route(
+            start_lng=restaurant.longitude,
+            start_lat=restaurant.latitude,
+            end_lng=user_lng,
+            end_lat=user_lat
+        )
+
+        if not route_result.get("success"):
+            return Response(
+                {"error": route_result.get("error", "Error occurred while fetching the route")},
+                status=status.HTTP_502_BAD_GATEWAY
+            )
+
+        distance_km = route_result["distance_km"]
+        duration_minutes = route_result["duration_minutes"]
+
+        # 🚀 Smart shipping cost calculation with DynamicPricingService
+        pricing_breakdown = DynamicPricingService.calculate_delivery_fee(distance_km)
+
+        return Response({
+            "restaurant_id": restaurant.id,
+            "restaurant_name": restaurant.name,
+            "distance_km": distance_km,
+            "duration_minutes": duration_minutes,
+            "pricing": pricing_breakdown, # 👈 Complete invoice details added to the API response
+            "route_geometry": route_result["route_geometry"]
+        })
