@@ -10,9 +10,9 @@ Using admin.GISModelAdmin instead of admin.ModelAdmin gives you:
   - Edit existing geometries visually
   - No need to type coordinate numbers!
 """
-
+from django.contrib import admin
 from django.contrib.gis import admin  # ← Import from gis, not regular admin
-from .models import Restaurant, Category, MenuItem
+from .models import Restaurant, Category, MenuItem , PricingConfig
 
 
 @admin.register(Restaurant)
@@ -73,6 +73,10 @@ class MenuItemInline(admin.TabularInline):
     model = MenuItem
     extra = 1
 
+@admin.register(PricingConfig)
+class PricingConfigAdmin(admin.ModelAdmin):
+    list_display = ('name', 'base_fee', 'per_km_rate', 'lunch_peak_multiplier', 'dinner_peak_multiplier', 'condition_multiplier', 'is_active', 'updated_at')
+    list_editable = ('base_fee', 'per_km_rate', 'lunch_peak_multiplier', 'dinner_peak_multiplier', 'condition_multiplier', 'is_active')
 
 # Alternative: Register Restaurant with MenuItems inline
 # admin.site.register(Restaurant, RestaurantAdmin)

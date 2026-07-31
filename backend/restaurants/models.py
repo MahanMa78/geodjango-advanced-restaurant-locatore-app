@@ -118,3 +118,71 @@ class MenuItem(models.Model):
     
     def __str__(self):
         return f'{self.name} ({self.restaurant.name})'
+    
+
+
+class PricingConfig(models.Model):
+    """
+    Dispatch System Dynamic Pricing Settings
+    This model is designed as a Singleton to ensure there is always an active configuration within the system.
+    """
+    name = models.CharField(
+        max_length=100, 
+        default="Default pricing settings",
+        verbose_name="Setting Name"
+    )
+    base_fee = models.IntegerField(
+        default=15000, 
+        help_text="Base delivery fee (IRR)",
+        verbose_name="Base Fee"
+    )
+    per_km_rate = models.IntegerField(
+        default=5000, 
+        help_text="Delivery fee per kilometer (IRR)",
+        verbose_name="Rate per Kilometer"
+    )
+    lunch_peak_multiplier = models.DecimalField(
+        max_digits=3, decimal_places=2, default=1.25,
+        validators=[MinValueValidator(1.0), MaxValueValidator(3.0)],
+        verbose_name="Lunch Peak Multiplier (12:00 to 15:30)"
+    )
+    dinner_peak_multiplier = models.DecimalField(
+        max_digits=3, decimal_places=2, default=1.30,
+        validators=[MinValueValidator(1.0), MaxValueValidator(3.0)],
+        verbose_name="Dinner Peak Multiplier (19:00 to 22:30)"
+    )
+    condition_multiplier = models.DecimalField(
+        max_digits=3, decimal_places=2, default=1.00,
+        validators=[MinValueValidator(1.0), MaxValueValidator(3.0)],
+        help_text="Condition multiplier for special conditions like rain, snow, or heavy traffic (1.0 = normal)",
+        verbose_name="Special Conditions/Weather Coefficient"
+    )
+    min_fee = models.IntegerField(
+        default=20000, 
+        help_text="Minimum delivery fee (IRR)",
+        verbose_name="Minimum Delivery Fee"
+    )
+    max_fee = models.IntegerField(
+        default=150000, 
+        help_text="Maximum delivery fee (IRR)",
+        verbose_name="Maximum Delivery Fee"
+    )
+    is_active = models.BooleanField(default=True, verbose_name="active")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Last Updated")
+
+    class Meta:
+        verbose_name = "Pricing Settings"
+        verbose_name_plural = "Pricing Settings"
+
+    def __str__(self):
+        return f"{self.name} - (base: {self.base_fee} | per km: {self.per_km_rate})"
+
+    @classmethod
+    def get_active_config(cls):
+        """
+        Retrieves the active settings; creates a default instance if none exists.
+        """
+        config = cls.objects.filter(is_active=True).first()
+        if not config:
+            config = cls.objects.create()
+        return config
