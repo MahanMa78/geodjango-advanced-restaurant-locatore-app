@@ -140,3 +140,9 @@ GitHub.sublime-settings
 .history
 .qodo
 features.txt
+
+# Vite cache & temp files
+frontend/.vite/
+.vite/
+node_modules/
+dist/
