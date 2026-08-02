@@ -338,5 +338,5 @@ class RestaurantRouteView(APIView):
             "distance_km": distance_km,
             "duration_minutes": duration_minutes,
             "pricing": pricing_breakdown, # 👈 Complete invoice details added to the API response
-            "route_geometry": route_result["route_geometry"]
+            "route_geometry": route_result.get("geojson") or route_result.get("route_geometry")
         })
