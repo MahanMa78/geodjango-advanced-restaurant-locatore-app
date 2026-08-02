@@ -132,11 +132,11 @@ function CategoryChip({ label, active, onClick }: { label: string; active: boole
 }
 
 /* ── Restaurant card ── */
-const PRICE: Record<number, string> = { 1: '₦', 2: '₦₦', 3: '₦₦₦' };
+const PRICE: Record<number, string> = { 1: '$', 2: '$$', 3: '$$$' };
 const FALLBACK = 'https://images.unsplash.com/photo-1567364816519-cbc9c4ffe5fb?w=120';
 
 function RestaurantCard({ restaurant, isSelected, onClick }: RestaurantCardProps) {
-  const price = PRICE[restaurant.price_range] ?? '₦₦';
+  const price = PRICE[restaurant.price_range] ?? '$$';
 
   return (
     <li
@@ -147,11 +147,14 @@ function RestaurantCard({ restaurant, isSelected, onClick }: RestaurantCardProps
       ].join(' ')}
     >
       {/* Thumbnail */}
-      <img
-        src={restaurant.image_url || FALLBACK}
+      <img 
+        src={restaurant.image_url || 'https://via.placeholder.com/150'} 
         alt={restaurant.name}
-        onError={(e) => { (e.currentTarget as HTMLImageElement).src = FALLBACK; }}
-        className="w-16 h-16 rounded-xl object-cover shrink-0 bg-edge"
+        className="w-14 h-14 rounded-lg object-cover bg-surface shrink-0 border border-edge"
+        onError={(e) => {
+          (e.target as HTMLImageElement).onerror = null; 
+          (e.target as HTMLImageElement).src = 'https://via.placeholder.com/150';
+        }} 
       />
 
       {/* Info */}

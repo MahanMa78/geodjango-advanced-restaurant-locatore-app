@@ -172,3 +172,29 @@ export interface Concept {
   code: string;
   api: string | null;
 }
+
+export interface PricingInfo {
+  final_fee: number;
+  base_fee: number;
+  distance_component: number;
+  distance_km: number;
+  is_peak_hour: boolean;
+  peak_multiplier: number;
+  condition_multiplier: number;
+  combined_multiplier: number;
+  surge_reasons: string[];
+  is_clamped_min: boolean;
+  is_clamped_max: boolean;
+}
+
+export interface RouteResponse {
+  restaurant_id: number;
+  restaurant_name: string;
+  distance_km: number;
+  duration_minutes: number;
+  pricing?: PricingInfo; 
+  route_geometry?: {
+    type: string;
+    coordinates: [number, number][];
+  };
+}

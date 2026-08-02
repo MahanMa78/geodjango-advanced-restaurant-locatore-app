@@ -154,19 +154,19 @@ export default function MapView(): ReactNode {
   }, [searchTerm]);
 
   useEffect(() => {
-    if (!selected) { setDetail(null); return; }
+    if (!selected?.id) { setDetail(null); return; }
     fetchRestaurant(selected.id).then(setDetail).catch(console.error);
-  }, [selected]);
+  }, [selected?.id]);
 
   useEffect(() => {
-    if (!selected || !userLocation) {
+    if (!selected?.id || !userLocation?.lat || !userLocation?.lng) {
       setRouteData(null);
       return;
     }
     fetchRoute(selected.id, userLocation.lat, userLocation.lng)
       .then(setRouteData)
       .catch(console.error);
-  }, [selected, userLocation.lat, userLocation.lng]);
+  }, [selected?.id, userLocation.lat, userLocation.lng]);
 
   const handleMapClick = useCallback((latlng: LatLng) => {
     setUserLocation({
@@ -179,8 +179,11 @@ export default function MapView(): ReactNode {
   }, []);
 
   const handleRestaurantClick = useCallback((r: Restaurant) => {
-    setSelected(prev => prev?.id === r.id ? null : r);
-  }, []);
+    setSelected(prev =>( prev?.id === r.id ? null : r));
+    if (selected?.id === r.id) {
+    setRouteData(null);
+    }
+  }, [selected?.id]);
 
   const handleLocateMe = useCallback(() => {
     if (!navigator.geolocation) {
@@ -285,23 +288,72 @@ export default function MapView(): ReactNode {
               icon={makeRestaurantIcon(selected?.id === r.id, r.is_open)}
               eventHandlers={{ click: () => handleRestaurantClick(r) }}
             >
+              {/* 🚀 پاپ‌آپ جدید با پشتیبانی از شکست کامل هزینه پویای ارسال */}
               <Popup>
-                <div className="p-3 min-w-[180px]">
-                  <p className="font-bold text-sm text-ink mb-2 leading-snug">{r.name}</p>
+                <div className="p-3 min-w-[210px]">
+                  <p className="font-bold text-sm text-ink mb-1.5 leading-snug">{r.name}</p>
+
+                  {/* 🛣️ بخش اطلاعات مسیریابی و قیمت */}
                   {selected?.id === r.id && routeData && (
-                    <div className="bg-purple-50 text-purple-700 p-2 rounded-lg text-xs mb-2 border border-purple-200">
-                      <p className="font-semibold">🛣️ مسیریابی خیابانی:</p>
-                      <p>مسافت: <strong>{routeData.distance_km} کیلومتر</strong></p>
-                      <p>زمان تخمینی: <strong>{routeData.duration_minutes} دقیقه</strong></p>
+                    <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-xs mb-3 space-y-1.5 shadow-sm">
+                      {/* اطلاعات مسافت و زمان */}
+                      <div className="flex justify-between items-center font-bold text-slate-800 border-b border-slate-200 pb-1">
+                        <span>🛣️ مسیریابی معابر:</span>
+                        <span>{routeData.distance_km} km ({routeData.duration_minutes} min)</span>
+                      </div>
+
+                      {/* اگر داده pricing از بک‌اند رسیده بود، ریز فاکتور را نشان بده */}
+                      {routeData.pricing ? (
+                        <>
+                          {/* علت افزایش قیمت (ساعت شلوغی / بارندگی) */}
+                          {routeData.pricing.surge_reasons && routeData.pricing.surge_reasons.length > 0 && (
+                            <div className="space-y-0.5 pt-1">
+                              {routeData.pricing.surge_reasons.map((reason, idx) => (
+                                <span key={idx} className="inline-block text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-md font-medium mr-1">
+                                  {reason}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* شکست قیمت */}
+                          <div className="text-[11px] text-slate-600 space-y-0.5 pt-1">
+                            <div className="flex justify-between">
+                              <span>ورودی پایه:</span>
+                              <span>{routeData.pricing.base_fee.toLocaleString()} تومان</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>مسافت ({routeData.pricing.distance_km} km):</span>
+                              <span>{routeData.pricing.distance_component.toLocaleString()} تومان</span>
+                            </div>
+                          </div>
+
+                          {/* قیمت نهایی */}
+                          <div className="flex justify-between items-center pt-1.5 border-t border-slate-200 text-purple-700 font-extrabold text-xs">
+                            <span>هزینه نهایی ارسال:</span>
+                            <span className="text-sm">{routeData.pricing.final_fee.toLocaleString()} تومان</span>
+                          </div>
+                        </>
+                      ) : (
+                        /* حالت رزرو: اگر به هر دلیلی pricing لود نشده بود */
+                        <div className="text-[11px] text-slate-500 pt-1">
+                          در حال دریافت محاسبات قیمت...
+                        </div>
+                      )}
                     </div>
                   )}
+
                   <div className="flex gap-1.5 flex-wrap mb-2">
                     <span className="text-[11px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded">⭐ {r.rating}</span>
                     {r.distance_km != null && (
                       <span className="text-[11px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">📍 {r.distance_km} km</span>
                     )}
                   </div>
-                  <p className="text-xs text-ink-muted mb-2.5">🕐 {r.delivery_time_min} min · {r.delivery_fee} delivery</p>
+                  
+                  <p className="text-xs text-ink-muted mb-2.5">
+                    🕐 {r.delivery_time_min} min · {routeData?.pricing ? `${routeData.pricing.final_fee.toLocaleString()} تومان` : `${r.delivery_fee} delivery`}
+                  </p>
+
                   <button
                     onClick={() => handleRestaurantClick(r)}
                     className="w-full py-1.5 bg-brand text-white text-xs font-semibold rounded-lg cursor-pointer border-0 hover:opacity-90 transition-opacity"
