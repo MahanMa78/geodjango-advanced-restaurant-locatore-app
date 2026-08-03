@@ -31,6 +31,7 @@ from .serializers import (
 )
 from .services import OSRMRoutingService
 from .pricing_service import DynamicPricingService
+from .geocoding_service import NominatimGeocodingService
 
 
 class RestaurantViewSet(viewsets.ModelViewSet):
@@ -240,7 +241,7 @@ class MenuItemViewSet(viewsets.ModelViewSet):
             restaurant_id=self.kwargs['restaurant_pk']
         )
         
-        
+ 
 @api_view(['GET'])
 def restaurant_route(request, pk):
     """
@@ -285,6 +286,7 @@ def restaurant_route(request, pk):
         'duration_minutes': route_result['duration_minutes'],
         'route_geometry': route_result['geojson']  # GeoJSON LineString
     })
+
 
 class RestaurantRouteView(APIView):
     """
@@ -340,3 +342,35 @@ class RestaurantRouteView(APIView):
             "pricing": pricing_breakdown, # 👈 Complete invoice details added to the API response
             "route_geometry": route_result.get("geojson") or route_result.get("route_geometry")
         })
+
+
+class ReverseGeocodeView(APIView):
+    """
+    GET /api/geocoding/reverse/?lat=36.27&lng=50.00
+    تبدیل مختصات جغرافیایی به آدرس متنی قابل فهم
+    """
+    def get(self, request):
+        lat = request.query_params.get('lat')
+        lng = request.query_params.get('lng')
+
+        if not lat or not lng:
+            return Response(
+                {"error": "پارامترهای lat و lng الزامی هستند."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            lat = float(lat)
+            lng = float(lng)
+        except ValueError:
+            return Response(
+                {"error": "مختصات ورودی نامعتبر است."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        result = NominatimGeocodingService.reverse_geocode(lat, lng)
+
+        if not result.get("success"):
+            return Response(result, status=status.HTTP_502_BAD_GATEWAY)
+
+        return Response(result)
