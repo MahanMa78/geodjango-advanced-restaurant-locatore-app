@@ -151,6 +151,7 @@ export interface RestaurantCardProps {
 export interface DetailPanelProps {
   restaurant: RestaurantDetail;
   onClose: () => void;
+  routeData?: RouteResponse | null;
 }
 
 export interface MapClickHandlerProps {
@@ -197,4 +198,14 @@ export interface RouteResponse {
     type: string;
     coordinates: [number, number][];
   };
+}
+
+export interface ReverseGeocodeResponse {
+  success: boolean;
+  full_address: string;
+  short_address: string;
+  city: string;
+  neighbourhood: string;
+  road: string;
+  error?: string;
 }

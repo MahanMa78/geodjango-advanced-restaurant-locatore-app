@@ -132,11 +132,11 @@ function CategoryChip({ label, active, onClick }: { label: string; active: boole
 }
 
 /* ── Restaurant card ── */
-const PRICE: Record<number, string> = { 1: '$', 2: '$$', 3: '$$$' };
+const PRICE: Record<number, string> = { 1: 'تومان', 2: 'تومان', 3: 'تومان' };
 const FALLBACK = 'https://images.unsplash.com/photo-1567364816519-cbc9c4ffe5fb?w=120';
 
 function RestaurantCard({ restaurant, isSelected, onClick }: RestaurantCardProps) {
-  const price = PRICE[restaurant.price_range] ?? '$$';
+  const price = PRICE[restaurant.price_range] ?? 'تومان';
 
   return (
     <li

@@ -8,7 +8,7 @@ import {
 import L, { type PathOptions } from 'leaflet';
 import type { GeoJsonObject } from 'geojson';
 
-import { fetchNearby, fetchRestaurant, fetchCategories, fetchZones, checkZone , fetchRoute} from '../api';
+import { fetchNearby, fetchRestaurant, fetchCategories, fetchZones, checkZone , fetchRoute , fetchReverseGeocode} from '../api';
 import type {
   Restaurant, RestaurantDetail, Category, DeliveryZone,
   LatLng, GeoJSONFeature, MapClickHandlerProps, MapControllerProps,
@@ -77,7 +77,8 @@ const activeZoneStyle = (): PathOptions => ({ fillColor: '#2563EB', fillOpacity:
 // ── MapView ────────────────────────────────────────────────
 
 export default function MapView(): ReactNode {
-  const [userLocation, setUserLocation]       = useState<LatLng>(DEFAULT_CENTER);
+  const [userLocation, setUserLocation]        = useState<LatLng>(DEFAULT_CENTER);
+  const [userAddress, setUserAddress]          = useState<string>('Retrieving address...');
   const [restaurants,  setRestaurants]         = useState<Restaurant[]>([]);
   const [selected,     setSelected]            = useState<Restaurant | null>(null);
   const [detail,       setDetail]              = useState<RestaurantDetail | null>(null);
@@ -168,6 +169,20 @@ export default function MapView(): ReactNode {
       .catch(console.error);
   }, [selected?.id, userLocation.lat, userLocation.lng]);
 
+  useEffect(() => {
+  if (!userLocation?.lat || !userLocation?.lng) return;
+
+  fetchReverseGeocode(userLocation.lat, userLocation.lng)
+    .then((data) => {
+      if (data.success) {
+        setUserAddress(data.short_address);
+      } else {
+        setUserAddress('Address unknown');
+      }
+    })
+    .catch(() => setUserAddress('Error retrieving address'));
+}, [userLocation.lat, userLocation.lng]);
+
   const handleMapClick = useCallback((latlng: LatLng) => {
     setUserLocation({
       lat: Number(latlng.lat.toFixed(6)),
@@ -230,10 +245,10 @@ export default function MapView(): ReactNode {
           {/* User pin */}
           <Marker position={[userLocation.lat, userLocation.lng]} icon={userIcon}>
             <Popup>
-              <div className="p-3">
-                <p className="font-semibold text-sm text-ink">📍 Your Location</p>
-                <p className="text-xs text-ink-muted mt-1">{userLocation.lat.toFixed(4)}, {userLocation.lng.toFixed(4)}</p>
-                <p className="text-[11px] text-ink-faint mt-1">Click anywhere to move</p>
+              <div className="p-3 min-w-[180px]">
+                <p className="font-semibold text-sm text-ink mb-1">📍 Your Location</p>
+                <p className="text-xs text-brand font-medium mb-1">{userAddress}</p>
+                <p className="text-[11px] text-ink-faint">{userLocation.lat.toFixed(4)}, {userLocation.lng.toFixed(4)}</p>
               </div>
             </Popup>
           </Marker>
@@ -409,6 +424,7 @@ export default function MapView(): ReactNode {
         {detail && (
           <DetailPanel
             restaurant={detail}
+            routeData={routeData}
             onClose={() => { setSelected(null); setDetail(null); }}
           />
         )}

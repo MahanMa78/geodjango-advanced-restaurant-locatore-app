@@ -1,10 +1,20 @@
 import type { DetailPanelProps, MenuItem } from '../types';
 
-const PRICE: Record<number, string> = { 1: '₦', 2: '₦₦', 3: '₦₦₦' };
+const PRICE: Record<number, string> = { 1: 'تومان', 2: 'تومان', 3: 'تومان' };
 const FALLBACK = 'https://images.unsplash.com/photo-1567364816519-cbc9c4ffe5fb?w=300';
 
-export default function DetailPanel({ restaurant, onClose }: DetailPanelProps) {
-  const price = PRICE[restaurant.price_range] ?? '₦₦';
+// 🚀 تغییر ۱: دریافت routeData در ورودی کامپوننت
+export default function DetailPanel({ restaurant, onClose, routeData }: DetailPanelProps) {
+  const price = PRICE[restaurant.price_range] ?? 'تومان';
+
+  // 🚀 تغییر ۲: محاسبه قیمت و زمان پویا از روی routeData
+  const deliveryFee = routeData?.pricing?.final_fee
+    ? `${routeData.pricing.final_fee.toLocaleString()} تومان`
+    : `${Number(restaurant.delivery_fee).toLocaleString()} تومان`;
+
+  const deliveryTime = routeData?.duration_minutes
+    ? `${routeData.duration_minutes} min`
+    : `${restaurant.delivery_time_min} min`;
 
   const menuByCategory = (restaurant.menu_items ?? []).reduce<Record<string, MenuItem[]>>(
     (acc, item) => {
@@ -64,12 +74,12 @@ export default function DetailPanel({ restaurant, onClose }: DetailPanelProps) {
             </button>
           </div>
 
-          {/* Stats strip */}
+          {/* 🚀 تغییر ۳: جایگزینی مقادیر پویا درون بخش Stats strip */}
           <div className="grid grid-cols-3 gap-2 mb-4">
             {[
-              { label: 'Delivery time', value: `${restaurant.delivery_time_min} min`, accent: true },
-              { label: 'Delivery fee', value: `₦${restaurant.delivery_fee}`, accent: true },
-              { label: 'Min. order', value: `₦${restaurant.minimum_order}`, accent: false },
+              { label: 'Delivery time', value: deliveryTime, accent: true },
+              { label: 'Delivery fee', value: deliveryFee, accent: true },
+              { label: 'Min. order', value: `${Number(restaurant.minimum_order).toLocaleString()} تومان`, accent: false },
             ].map((s) => (
               <div key={s.label} className="bg-surface rounded-xl p-3 text-center border border-edge">
                 <p className="text-[10px] text-ink-faint uppercase tracking-wide mb-1">{s.label}</p>
@@ -120,7 +130,7 @@ export default function DetailPanel({ restaurant, onClose }: DetailPanelProps) {
                             )}
                           </div>
                           <p className="text-sm font-bold text-brand shrink-0" style={{ fontFamily: 'Syne, sans-serif' }}>
-                            ₦{Number(item.price).toLocaleString()}
+                            {Number(item.price).toLocaleString()} تومان
                           </p>
                         </div>
                       ))}

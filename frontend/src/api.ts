@@ -24,6 +24,7 @@ import type {
   NearbyParams,
   BboxParams,
 } from './types';
+import type { ReverseGeocodeResponse } from './types';
 
 const api = axios.create({
   baseURL: 'http://localhost:8000/api',
@@ -212,3 +213,10 @@ export async function checkZone({
 }
 
 export default api;
+
+export async function fetchReverseGeocode(lat: number, lng: number): Promise<ReverseGeocodeResponse> {
+  const res = await api.get<ReverseGeocodeResponse>('/geocoding/reverse/', {
+    params: { lat, lng },
+  });
+  return res.data;
+}
