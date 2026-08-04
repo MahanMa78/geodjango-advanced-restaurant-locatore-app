@@ -374,3 +374,47 @@ class ReverseGeocodeView(APIView):
             return Response(result, status=status.HTTP_502_BAD_GATEWAY)
 
         return Response(result)
+
+class CreateOrderView(APIView):
+    """
+    POST /api/orders/create/
+    Placing a new order and automatically executing the courier movement simulation in Celery.
+    """
+    def post(self, request):
+        restaurant_id = request.data.get('restaurant_id')
+        lat = request.data.get('lat')
+        lng = request.data.get('lng')
+        address = request.data.get('address', '')
+        total_amount = request.data.get('total_amount', 0)
+        delivery_fee = request.data.get('delivery_fee', 0)
+
+        if not all([restaurant_id, lat, lng]):
+            return Response(
+                {"error": "The parameters restaurant_id, lat, and lng are required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            restaurant = Restaurant.objects.get(id=restaurant_id)
+        except Restaurant.DoesNotExist:
+            return Response({"error": "Restaurant not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Create New Order
+        order = Order.objects.create(
+            restaurant=restaurant,
+            delivery_location=Point(float(lng), float(lat), srid=4326),
+            delivery_address=address,
+            total_amount=total_amount,
+            delivery_fee=delivery_fee,
+            status='PREPARING'
+        )
+
+        # Calling async Celery task to simulate the movement of the pickaxe
+        simulate_courier_movement.delay(order.id)
+
+        return Response({
+            "success": True,
+            "order_id": order.id,
+            "status": order.status,
+            "message": "Order placed successfully and the courier will arrive soon."
+        }, status=status.HTTP_201_CREATED)
