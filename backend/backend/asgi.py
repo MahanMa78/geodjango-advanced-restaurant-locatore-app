@@ -1,16 +1,19 @@
-"""
-ASGI config for backend project.
+# ASGI & WebSockets Configuration
+ASGI_APPLICATION = 'backend.asgi.application'
 
-It exposes the ASGI callable as a module-level variable named ``application``.
+REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
 
-For more information on this file, see
-https://docs.djangoproject.com/en/6.0/howto/deployment/asgi/
-"""
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            "hosts": [REDIS_URL],
+        },
+    },
+}
 
-import os
-
-from django.core.asgi import get_asgi_application
-
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'backend.settings')
-
-application = get_asgi_application()
+# Celery Configuration
+CELERY_BROKER_URL = REDIS_URL
+CELERY_RESULT_BACKEND = REDIS_URL
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'

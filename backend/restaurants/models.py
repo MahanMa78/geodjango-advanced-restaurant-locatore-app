@@ -186,3 +186,44 @@ class PricingConfig(models.Model):
         if not config:
             config = cls.objects.create()
         return config
+
+
+class Courier(models.Model):
+    "Courier / Motorcycle Delivery Rider Model"
+    name = models.CharField(max_length=150)
+    phone = models.CharField(max_length=20)
+    is_available = models.BooleanField(default=True)
+    # Courier's live location on the map
+    current_location = models.PointField(srid=4326, null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.name} ({'free' if self.is_available else 'busy'})"
+
+
+
+class Order(models.Model):
+    """Order Placement and Tracking Status Model"""
+    STATUS_CHOICES = [
+        ('PENDING', 'Awaiting approval'),
+        ('PREPARING', 'Preparing'),
+        ('ON_THE_WAY', 'Out for delivery via courier'),
+        ('DELIVERED', 'Delivered'),
+        ('CANCELLED', 'Cancelled'),
+    ]
+
+    restaurant = models.ForeignKey(Restaurant, on_delete=models.CASCADE, related_name='orders')
+    courier = models.ForeignKey(Courier, on_delete=models.SET_NULL, null=True, blank=True, related_name='orders')
+
+    # Order delivery destination fields 
+    delivery_location = models.PointField(srid=4326, geography=True, help_text="User's delivery destination coordinates")
+    delivery_address = models.CharField(max_length=255, blank=True, help_text="Human readable address from geocoding")
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    total_amount = models.DecimalField(max_digits=12, decimal_places=0)
+    delivery_fee = models.DecimalField(max_digits=10, decimal_places=0)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Order #{self.id} - {self.restaurant.name} ({self.get_status_display()})"
