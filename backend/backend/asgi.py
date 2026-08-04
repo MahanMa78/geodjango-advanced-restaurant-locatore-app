@@ -1,19 +1,20 @@
-# ASGI & WebSockets Configuration
-ASGI_APPLICATION = 'backend.asgi.application'
+import os
+from django.core.asgi import get_asgi_application
+from channels.routing import ProtocolTypeRouter, URLRouter
+from channels.auth import AuthMiddlewareStack
 
-REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'backend.settings')
 
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels_redis.core.RedisChannelLayer',
-        'CONFIG': {
-            "hosts": [REDIS_URL],
-        },
-    },
-}
+django_asgi_app = get_asgi_application()
 
-# Celery Configuration
-CELERY_BROKER_URL = REDIS_URL
-CELERY_RESULT_BACKEND = REDIS_URL
-CELERY_ACCEPT_CONTENT = ['json']
-CELERY_TASK_SERIALIZER = 'json'
+# In the next steps, we will connect the websocket_urlpatterns paths here.
+import restaurants.routing
+
+application = ProtocolTypeRouter({
+    "http": django_asgi_app,
+    "websocket": AuthMiddlewareStack(
+        URLRouter(
+            restaurants.routing.websocket_urlpatterns
+        )
+    ),
+})

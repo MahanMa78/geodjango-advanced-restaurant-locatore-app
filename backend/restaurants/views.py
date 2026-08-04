@@ -21,7 +21,7 @@ from rest_framework.decorators import action , api_view
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Restaurant, Category, MenuItem
+from .models import Restaurant, Category, MenuItem , Order
 from .serializers import (
     RestaurantListSerializer,
     RestaurantDetailSerializer, 
@@ -32,6 +32,7 @@ from .serializers import (
 from .services import OSRMRoutingService
 from .pricing_service import DynamicPricingService
 from .geocoding_service import NominatimGeocodingService
+from .tasks import simulate_courier_movement
 
 
 class RestaurantViewSet(viewsets.ModelViewSet):
