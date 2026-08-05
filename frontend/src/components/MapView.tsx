@@ -26,6 +26,13 @@ L.Icon.Default.mergeOptions({
 
 // ── Icons ──────────────────────────────────────────────────
 
+const courierIcon = L.divIcon({
+  html: `<div style="width:36px;height:36px;background:#8B5CF6;border:2px solid #fff;border-radius:50%;box-shadow:0 4px 12px rgba(139,92,246,0.4);display:flex;align-items:center;justify-content:center;font-size:18px;">🛵</div>`,
+  className: '',
+  iconSize: [36, 36],
+  iconAnchor: [18, 18],
+});
+
 const userIcon = L.divIcon({
   html: `<div style="width:16px;height:16px;background:#2563EB;border:2.5px solid #fff;border-radius:50%;box-shadow:0 0 0 4px rgba(37,99,235,0.2)"></div>`,
   className: '', iconSize: [16, 16], iconAnchor: [8, 8],
@@ -77,6 +84,7 @@ const activeZoneStyle = (): PathOptions => ({ fillColor: '#2563EB', fillOpacity:
 // ── MapView ────────────────────────────────────────────────
 
 export default function MapView(): ReactNode {
+  const wsRef = useRef<WebSocket | null>(null);
   const [userLocation, setUserLocation]        = useState<LatLng>(DEFAULT_CENTER);
   const [userAddress, setUserAddress]          = useState<string>('Retrieving address...');
   const [restaurants,  setRestaurants]         = useState<Restaurant[]>([]);
@@ -93,6 +101,9 @@ export default function MapView(): ReactNode {
   const [showRadius,   setShowRadius]          = useState<boolean>(true);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [routeData, setRouteData] = useState<RouteResponse | null>(null);
+  const [activeOrderId, setActiveOrderId] = useState<number | null>(null);
+  const [courierLocation, setCourierLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [orderStatus, setOrderStatus] = useState<string>('');
   // Auto detect location safely on mount
   useEffect(() => {
     if (navigator.geolocation) {
@@ -174,14 +185,58 @@ export default function MapView(): ReactNode {
 
   fetchReverseGeocode(userLocation.lat, userLocation.lng)
     .then((data) => {
-      if (data.success) {
+      if (data && data.success) {
         setUserAddress(data.short_address);
       } else {
         setUserAddress('Address unknown');
       }
     })
-    .catch(() => setUserAddress('Error retrieving address'));
+    .catch(() => {
+      setUserAddress('موقعیت انتخابی روی نقشه');
+      });
 }, [userLocation.lat, userLocation.lng]);
+
+  useEffect(() => {
+    if (!activeOrderId) return;
+
+    const wsUrl = `ws://localhost:8000/ws/orders/${activeOrderId}/`;
+    const socket = new WebSocket(wsUrl);
+    wsRef.current = socket;
+
+    socket.onopen = () => {
+      console.log(`🔌 Connected to WebSocket tracking for Order #${activeOrderId}`);
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'courier_location_update') {
+          if (typeof data.courier_lat === 'number' && typeof data.courier_lng === 'number') {
+            setCourierLocation({ lat: data.courier_lat, lng: data.courier_lng });
+          }
+          setOrderStatus(data.message || data.status);
+
+          if (data.status === 'DELIVERED') {
+            setTimeout(() => {
+              alert('🎉 سفارش شما با موفقیت تحویل داده شد!');
+            }, 500);
+          }
+        }
+      } catch (err) {
+        console.error('Error parsing WebSocket message:', err);
+      }
+    };
+
+    socket.onerror = (error) => console.error('WebSocket Error:', error);
+    socket.onclose = () => console.log('WebSocket Connection Closed');
+
+    return () => {
+      // فقط زمانی سوکت را ببند که activeOrderId واقعاً تغییر کرده یا نال شده باشد
+      if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+        socket.close();
+      }
+    };
+  }, [activeOrderId]);
 
   const handleMapClick = useCallback((latlng: LatLng) => {
     setUserLocation({
@@ -294,6 +349,17 @@ export default function MapView(): ReactNode {
           {showZones && userZones.map((f, i) => (
             <GeoJSON key={`uz-${f.id ?? i}`} data={f as unknown as GeoJsonObject} style={activeZoneStyle} />
           ))}
+
+          {courierLocation && typeof courierLocation.lat === 'number' && typeof courierLocation.lng === 'number' && (
+          <Marker position={[courierLocation.lat, courierLocation.lng]} icon={courierIcon}>
+            <Popup>
+              <div className="p-2 text-center min-w-[150px]">
+                <p className="font-bold text-xs text-purple-700 mb-1">🛵 پیک اکسپرس</p>
+                <p className="text-[11px] text-slate-600 font-medium">{orderStatus}</p>
+              </div>
+            </Popup>
+          </Marker>
+        )}
 
           {/* Restaurant markers */}
           {restaurants.map(r => (
@@ -425,6 +491,9 @@ export default function MapView(): ReactNode {
           <DetailPanel
             restaurant={detail}
             routeData={routeData}
+            userLocation={userLocation}
+            userAddress={userAddress}
+            onOrderCreated={(orderId) => setActiveOrderId(orderId)}
             onClose={() => { setSelected(null); setDetail(null); }}
           />
         )}

@@ -1,13 +1,57 @@
 import type { DetailPanelProps, MenuItem } from '../types';
+import { useState } from 'react';
+import { createOrder } from '../api';
 
 const PRICE: Record<number, string> = { 1: 'تومان', 2: 'تومان', 3: 'تومان' };
-const FALLBACK = 'https://images.unsplash.com/photo-1567364816519-cbc9c4ffe5fb?w=300';
+const FALLBACK = 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=300';
 
-// 🚀 تغییر ۱: دریافت routeData در ورودی کامپوننت
-export default function DetailPanel({ restaurant, onClose, routeData }: DetailPanelProps) {
+interface ExtendedDetailPanelProps extends DetailPanelProps {
+  userLocation?: { lat: number; lng: number } | null;
+  userAddress?: string;
+  onOrderCreated?: (orderId: number) => void;
+}
+
+export default function DetailPanel({ 
+  restaurant,
+  onClose,
+  routeData,
+  userLocation, 
+  userAddress, 
+  onOrderCreated 
+}: ExtendedDetailPanelProps) {
+  const [loading, setLoading] = useState(false);
+
+  const handleOrder = async () => {
+    if (!userLocation?.lat || !userLocation?.lng) {
+      alert('لطفاً موقعیت خود را روی نقشه انتخاب کنید.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await createOrder({
+        restaurant_id: restaurant.id,
+        lat: userLocation.lat,
+        lng: userLocation.lng,
+        address: userAddress || '',
+        total_amount: 100000,
+        delivery_fee: routeData?.pricing?.final_fee || Number(restaurant.delivery_fee) || 15000,
+      });
+
+      if (response.success && onOrderCreated) {
+        onOrderCreated(response.order_id);
+        onClose(); // 🚀 بسته شدن پنل جهت جلوگیری از کرش UI و تداخل State
+      }
+    } catch (err) {
+      console.error('Failed to create order:', err);
+      alert('خطا در ثبت سفارش. لطفاً دوباره تلاش کنید.');
+    } finally {
+      setLoading(false);
+    }
+  };  
+
   const price = PRICE[restaurant.price_range] ?? 'تومان';
 
-  // 🚀 تغییر ۲: محاسبه قیمت و زمان پویا از روی routeData
   const deliveryFee = routeData?.pricing?.final_fee
     ? `${routeData.pricing.final_fee.toLocaleString()} تومان`
     : `${Number(restaurant.delivery_fee).toLocaleString()} تومان`;
@@ -26,26 +70,26 @@ export default function DetailPanel({ restaurant, onClose, routeData }: DetailPa
   );
 
   return (
-    /* Backdrop + slide-up sheet */
     <div className="absolute inset-0 z-[1000] flex flex-col justify-end pointer-events-none">
       <div
         className="bg-white rounded-t-2xl shadow-lift pointer-events-auto max-h-[62vh] flex flex-col animate-slide-up"
         style={{ borderTop: '1px solid #ECEAE4' }}
       >
-        {/* Handle */}
         <div className="flex justify-center pt-3 pb-1 cursor-pointer shrink-0" onClick={onClose}>
           <div className="w-10 h-1 rounded-full bg-edge-dark" />
         </div>
 
-        {/* Scrollable body */}
         <div className="overflow-y-auto scrollbar-thin px-5 pb-6">
-
-          {/* Header row */}
           <div className="flex gap-4 items-start mb-4">
             <img
               src={restaurant.image_url || FALLBACK}
               alt={restaurant.name}
-              onError={(e) => { (e.currentTarget as HTMLImageElement).src = FALLBACK; }}
+              onError={(e) => { 
+                const target = e.currentTarget as HTMLImageElement;
+                if (target.src !== FALLBACK) {
+                  target.src = FALLBACK;
+                }
+              }}
               className="w-20 h-20 rounded-xl object-cover shrink-0 bg-edge"
             />
             <div className="flex-1 min-w-0 pt-0.5">
@@ -74,7 +118,6 @@ export default function DetailPanel({ restaurant, onClose, routeData }: DetailPa
             </button>
           </div>
 
-          {/* 🚀 تغییر ۳: جایگزینی مقادیر پویا درون بخش Stats strip */}
           <div className="grid grid-cols-3 gap-2 mb-4">
             {[
               { label: 'Delivery time', value: deliveryTime, accent: true },
@@ -90,7 +133,6 @@ export default function DetailPanel({ restaurant, onClose, routeData }: DetailPa
             ))}
           </div>
 
-          {/* GeoDjango callout */}
           <div className="rounded-xl px-4 py-3 mb-5 border" style={{ background: '#F8F7FF', borderColor: '#E0DEFF' }}>
             <p className="text-[11px] font-semibold mb-1.5" style={{ color: '#5B4FBE' }}>
               🌍 GeoDjango PointField
@@ -103,7 +145,6 @@ export default function DetailPanel({ restaurant, onClose, routeData }: DetailPa
             </code>
           </div>
 
-          {/* Menu */}
           {Object.keys(menuByCategory).length > 0 ? (
             <>
               <h3 className="font-bold text-sm text-ink mb-3" style={{ fontFamily: 'Syne, sans-serif' }}>
@@ -143,9 +184,12 @@ export default function DetailPanel({ restaurant, onClose, routeData }: DetailPa
             <p className="text-xs text-ink-faint text-center py-4">No menu items available</p>
           )}
 
-          {/* CTA */}
-          <button className="w-full mt-5 h-11 rounded-xl bg-brand text-white font-semibold text-sm hover:opacity-90 active:scale-[0.98] transition-all cursor-pointer border-0">
-            Order Now
+          <button
+            onClick={handleOrder}
+            disabled={loading}
+            className="w-full mt-5 h-11 rounded-xl bg-brand text-white font-semibold text-sm hover:opacity-90 active:scale-[0.98] transition-all cursor-pointer border-0 disabled:opacity-50"
+          >
+            {loading ? 'در حال ثبت سفارش...' : 'Order Now 🛵'}
           </button>
         </div>
       </div>

@@ -220,3 +220,24 @@ export async function fetchReverseGeocode(lat: number, lng: number): Promise<Rev
   });
   return res.data;
 }
+
+export interface CreateOrderPayload {
+  restaurant_id: number;
+  lat: number;
+  lng: number;
+  address: string;
+  total_amount: number;
+  delivery_fee: number;
+}
+
+export interface CreateOrderResponse {
+  success: boolean;
+  order_id: number;
+  status: string;
+  message: string;
+}
+
+export async function createOrder(payload: CreateOrderPayload): Promise<CreateOrderResponse> {
+  const res = await api.post<CreateOrderResponse>('/orders/create/', payload);
+  return res.data;
+}
