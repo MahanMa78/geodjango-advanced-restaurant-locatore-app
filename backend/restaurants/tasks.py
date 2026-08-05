@@ -73,8 +73,8 @@ def simulate_courier_movement(order_id):
             }
         )
 
-        # 1.5-second pause between each step to create a smooth movement animation
-        time.sleep(1.5)
+        # 2.0-second pause between each step to create a smooth movement animation
+        time.sleep(2.0)
 
     # 4. End of Route and Order Delivery
     order.status = 'DELIVERED'

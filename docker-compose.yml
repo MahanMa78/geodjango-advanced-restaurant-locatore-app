@@ -28,6 +28,9 @@ services:
       - .:/code
     ports:
       - "8000:8000"
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     environment:
       - DATABASE_URL=postgis://myprojectuser:mypassword@db:5432/mygeodb
       - REDIS_URL=redis://redis:6379/0
