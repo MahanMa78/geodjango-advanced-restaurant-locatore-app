@@ -20,6 +20,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action , api_view
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from .utils import get_spatial_cache, set_spatial_cache
 
 from .models import Restaurant, Category, MenuItem , Order
 from .serializers import (
@@ -138,17 +139,25 @@ class RestaurantViewSet(viewsets.ModelViewSet):
             lat = float(lat)
             lng = float(lng)
             radius_km = float(request.query_params.get('radius', 5))
+            category = request.query_params.get('category', None)
         except ValueError:
             return Response(
                 {'error': 'lat, lng, and radius must be numeric'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        # 🚀 ۱. بررسی وجود پاسخ در کش Redis (Cache Hit)
+        cache_key_or_data, is_hit = get_spatial_cache(lat, lng, radius_km, category)
+        if is_hit:
+            return Response(cache_key_or_data)
         
         # ─────────────────────────────────────────────
         # STEP 1: Create a Point from user's location
         # Point(longitude, latitude) — lng first!
         # srid=4326 tells PostGIS this is WGS84 (GPS) coordinates
         # ─────────────────────────────────────────────
+        
+        # 🚀 ۲. در صورت Cache Miss، اجرای کوئری PostGIS
         user_location = Point(lng, lat, srid=4326)
         
         # ─────────────────────────────────────────────
@@ -171,7 +180,6 @@ class RestaurantViewSet(viewsets.ModelViewSet):
         ).order_by('distance')  # Closest first
         
         # Optional filters on top of spatial filter
-        category = request.query_params.get('category')
         if category:
             qs = qs.filter(category__name__icontains=category)
         
@@ -179,7 +187,12 @@ class RestaurantViewSet(viewsets.ModelViewSet):
         serializer = RestaurantListSerializer(
             qs, many=True, context={'request': request}
         )
-        return Response(serializer.data)
+        data = serializer.data
+
+        # 🚀 ۳. ذخیره خروجی دیتابیس در Redis برای درخواست‌های بعدی
+        set_spatial_cache(cache_key_or_data, data, timeout=300)
+
+        return Response(data)
     
     @action(detail=False, methods=['get'])
     def bbox(self, request):

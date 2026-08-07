@@ -19,3 +19,5 @@ celery>=5.3.0
 redis>=5.0.0
 channels>=4.0.0
 channels-redis>=4.1.0
+pygeohash>=3.3.1
+django-redis>=7.0.0

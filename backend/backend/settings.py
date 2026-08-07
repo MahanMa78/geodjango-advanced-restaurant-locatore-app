@@ -177,6 +177,16 @@ ASGI_APPLICATION = 'backend.asgi.application'
 
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
 
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": "redis://redis:6379/1",
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        }
+    }
+}
+
 CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels_redis.core.RedisChannelLayer',
