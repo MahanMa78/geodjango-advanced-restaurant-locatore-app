@@ -1,6 +1,9 @@
-# NearMe — Full-Stack GeoDjango Restaurant Discovery Platform
+Markdown
 
-> A production-ready geographic web application built with GeoDjango, PostGIS, React, Vite, and TypeScript. Find restaurants near you, visualize delivery zones, and run real spatial queries — all powered by PostGIS and displayed on a live Leaflet map.
+````
+# NearMe — Advanced Enterprise Web GIS & Live Courier Tracking Platform
+
+> A production-ready, fully dockerized geographic web application built with GeoDjango, PostGIS, React, Vite, and TypeScript. Search restaurants, calculate OSRM road routes, calculate dynamic delivery fees, track couriers live via WebSockets & Celery, and execute sub-10ms spatial queries powered by Redis Geohash Caching.
 
 ---
 
@@ -8,196 +11,129 @@
 
 | Layer | Technology |
 |---|---|
-| Backend | Django 5, GeoDjango, Django REST Framework |
-| Spatial DB | PostgreSQL + PostGIS |
-| Geo Libraries | GDAL, GEOS, PROJ |
-| API | djangorestframework-gis (GeoJSON) |
+| Backend | Django 6.0, GeoDjango, Django REST Framework |
+| Spatial DB | PostgreSQL 15 + PostGIS |
+| Geo Libraries | GDAL, GEOS, PROJ, djangorestframework-gis |
+| Real-Time & Tasks | Django Channels (WebSockets), Celery, Daphne |
+| Caching & Broker | Redis (Spatial Geohash Cache + Channel Layers) |
+| Routing & Geocoding | OSRM Engine (Road Routing), Nominatim API (Reverse Geocode) |
 | Frontend | React 18, Vite, TypeScript |
-| Map | Leaflet, react-leaflet |
+| Map | Leaflet.js, react-leaflet |
 | Styling | Tailwind CSS |
+| Infrastructure | Docker & Docker Compose |
 
 ---
 
 ## Prerequisites
 
-Make sure these are installed on your system before anything else.
+Make sure Docker and Docker Compose are installed on your system before anything else.
 
-### macOS
+### Docker Environment
 
-```bash
-# Install Homebrew if you don't have it
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-# System dependencies
-brew install postgresql@15 postgis gdal geos proj
-
-# Start PostgreSQL
-brew services start postgresql@15
-```
-
-### Ubuntu / WSL2 (Windows)
+Ensure Docker Daemon is active on your machine:
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y \
-    python3-pip python3-venv \
-    postgresql postgresql-contrib \
-    postgis postgresql-15-postgis-3 \
-    binutils libproj-dev gdal-bin libgdal-dev python3-gdal
-
-sudo systemctl start postgresql
-sudo systemctl enable postgresql
-```
-
-### Windows (Native)
-
-1. Install PostgreSQL from https://www.postgresql.org/download/windows/ — run **Stack Builder** after and install the PostGIS extension
-2. Install OSGeo4W from https://trac.osgeo.org/osgeo4w/ — choose **Advanced Install** and select `gdal`, `geos`, `proj`
-3. Add these paths to `backend/nearme/settings.py` (adjust version numbers to match your install):
-
-```python
-GDAL_LIBRARY_PATH = r'C:\OSGeo4W\bin\gdal309.dll'
-GEOS_LIBRARY_PATH = r'C:\OSGeo4W\bin\geos_c.dll'
-```
-
-> **Tip:** WSL2 is much smoother on Windows. Run `wsl --install` in PowerShell as Administrator, then follow the Ubuntu steps above inside WSL2.
-
----
+# Verify Docker Installation
+docker --version
+docker compose version
+````
 
 ## Project Structure
 
+Plaintext
+
 ```
-nearme/
+geodjango-advanced-restaurant-locatore-app/
 ├── backend/
-│   ├── nearme/               # Django project config
-│   │   ├── settings.py       # PostGIS engine, CORS, DRF settings
-│   │   └── urls.py
-│   ├── restaurants/          # Core app — PointField models + spatial views
-│   │   ├── models.py         # Restaurant (PointField), Category, MenuItem
-│   │   ├── serializers.py    # GeoFeatureModelSerializer → GeoJSON
-│   │   ├── views.py          # nearby(), bbox() spatial query endpoints
-│   │   ├── admin.py          # GISModelAdmin with map widgets
+│   ├── backend/               # Django core setup (settings, asgi, urls)
+│   ├── restaurants/           # Main GIS Application
+│   │   ├── models.py          # Restaurant (PointField), Order, Courier, MenuItem
+│   │   ├── serializers.py     # GeoJSON serializers
+│   │   ├── views.py           # APIViews & ViewSets (nearby, bbox, route, order)
+│   │   ├── utils.py           # Redis Geohash spatial caching strategy
+│   │   ├── services.py        # OSRM Routing & Nominatim Geocoding services
+│   │   ├── pricing_service.py # Dynamic Delivery Pricing Engine
+│   │   ├── tasks.py           # Celery background task for courier simulation
+│   │   ├── consumers.py       # WebSocket consumers for real-time tracking
 │   │   └── management/
 │   │       └── commands/
-│   │           ├── seed_data.py              # Create sample Lagos data
-│   │           └── import__restaurants_online.py # Pull real data from OSM
-│   ├── zones/                # Delivery zones — PolygonField + containment
-│   ├── requirements.txt
-└── frontend/
-    ├── src/
-    │   ├── types.ts           # All TypeScript interfaces
-    │   ├── api.ts             # Typed API layer + GeoJSON parsers
-    │   ├── App.tsx
-    │   └── components/
-    │       ├── MapView.tsx         # Leaflet map + spatial query controls
-    │       ├── RestaurantSidebar.tsx
-    │       ├── DetailPanel.tsx
-    │       └── ConceptsView.tsx    # Interactive GeoDjango reference
-    ├── tailwind.config.js
-    ├── vite.config.ts
-    └── package.json
+│   │           ├── seed_data.py              # Create sample delivery zones & data
+│   │           └── import_restaurants_online.py # Pull real data from OSM
+│   ├── zones/                 # Delivery Zones (PolygonField + Containment)
+│   ├── Dockerfile
+│   └── requirements.txt
+├── frontend/
+│   ├── src/
+│   │   ├── components/        # MapView, OrderTracking, DetailPanel, Sidebar
+│   │   ├── api.ts             # Axios API client & GeoJSON interfaces
+│   │   └── App.tsx
+│   ├── Dockerfile
+│   └── package.json
+├── docker-compose.yml         # Container orchestration (web, db, redis, celery)
+└── README.md
 ```
 
----
+## Docker Setup & Quick Start
 
-## Backend Setup
+### 1. Build and Start Docker Containers
 
-### 1. Create the PostGIS database
+Bash
 
-```bash
-# macOS
-psql postgres
-
-# Ubuntu / WSL2
-sudo -u postgres psql
+```
+docker compose up -d --build
 ```
 
-```sql
-CREATE USER restaurant_locator_user WITH PASSWORD 'restaurant_locator_pass';
-CREATE DATABASE restaurant_locator OWNER restaurant_locator_user;
-\c restaurant_locator_db
-CREATE EXTENSION postgis;
+### 2. Run Database Migrations
 
--- Verify
-SELECT postgis_version();
-\q
+Bash
+
+```
+docker compose exec web python manage.py migrate
 ```
 
-### 2. Configure environment
+### 3. Load Data
 
-```bash
-cd backend
+**Option A — Import real restaurants from OpenStreetMap (Overpass API):**
 
+Bash
 
-### 3. Install Python dependencies
-
-```bash
-# Create and activate virtual environment
-python3 -m venv geoenv
-source geoenv/bin/activate        # macOS / Linux / WSL2
-# geoenv\Scripts\activate         # Windows
-
-pip install -r requirements.txt
+```
+docker compose exec web python manage.py import_restaurants_online
 ```
 
-### 4. Run migrations
+_Pulls real restaurant names and coordinates from OSM Overpass API for Qazvin city._
 
-```bash
-python manage.py makemigrations
-python manage.py migrate
+**Option B — Seed with sample data and delivery zones:**
+
+Bash
+
+```
+# Seed Qazvin city with 2.0 km radius zones
+docker compose exec web python manage.py seed_data --city "Qazvin" --radius-km 2.0 --reseed
 ```
 
-### 5. Load data
+### 4. Create Admin User
 
-**Option A — Seed with sample Lagos data (fastest):**
+Bash
 
-```bash
-python manage.py seed_data
+```
+docker compose exec web python manage.py createsuperuser
 ```
 
-Creates 10 restaurants with real Lagos coordinates, 3 delivery zone polygons, menu items, and a Lagos MultiPolygon service area.
+### 5. Access Services
 
-**Option B — Import real restaurants from OpenStreetMap:**
-
-```bash
-python manage.py import_restaurants_online
-```
-
-Pulls real restaurant names and coordinates from the OSM Overpass API and reverse-geocodes their addresses via Nominatim. Requires an internet connection.
-
-### 6. Create admin user
-
-```bash
-python manage.py createsuperuser
-```
-
-### 7. Start the server
-
-```bash
-python manage.py runserver
-```
-
-API is live at **http://localhost:8000**
-
----
-
-## Frontend Setup
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-App is live at **http://localhost:5173**
-
-> Both the Django server and the Vite dev server must be running at the same time. The Vite proxy forwards `/api/*` requests to `localhost:8000` automatically.
-
----
+- **Frontend Web App:** `http://localhost:5173`
+    
+- **Django REST API:** `http://localhost:8000/api/`
+    
+- **Admin Dashboard:** `http://localhost:8000/admin/`
+    
 
 ## API Reference
 
-### Restaurants
+### Restaurants & Spatial Queries
+
+Plaintext
 
 ```
 GET  /api/restaurants/
@@ -207,16 +143,18 @@ GET  /api/restaurants/:id/
      Single restaurant with menu items
 
 GET  /api/restaurants/nearby/?lat=&lng=&radius=
-     Spatial: restaurants within radius km (distance_lte)
+     Spatial: restaurants within radius km (distance_lte with Redis Geohash Cache)
 
 GET  /api/restaurants/bbox/?min_lat=&max_lat=&min_lng=&max_lng=
      Spatial: restaurants within map viewport (within)
 
-GET  /api/categories/
-     All food categories
+GET  /api/restaurants/:id/route/?user_lat=&user_lng=
+     Spatial Routing: OSRM road network geometry + Dynamic Delivery Pricing
 ```
 
-### Delivery Zones
+### Delivery Zones & Geocoding
+
+Plaintext
 
 ```
 GET  /api/zones/
@@ -225,82 +163,90 @@ GET  /api/zones/
 GET  /api/zones/check/?lat=&lng=
      Spatial: which zones contain this point (area__contains)
 
-GET  /api/zones/overlapping/?zone_id=
-     Spatial: zones that intersect a given zone (area__intersects)
+GET  /api/geocoding/reverse/?lat=&lng=
+     Reverse Geocode coordinates to street address via Nominatim API
 ```
 
-### Example spatial queries
+### Orders & Real-time Courier Tracking
 
-```bash
-# Restaurants within 5km of Victoria Island
-curl "http://localhost:8000/api/restaurants/nearby/?lat=6.4281&lng=3.4273&radius=5"
+Plaintext
 
-# Check if a point is inside a delivery zone
-curl "http://localhost:8000/api/zones/check/?lat=6.43&lng=3.42"
+```
+POST /api/orders/create/
+     Place new order & trigger Celery courier tracking simulation
+
+WS   /ws/orders/:order_id/
+     WebSocket channel for live sub-second courier coordinate updates
 ```
 
----
+### Example Spatial Queries
 
-## Django Admin
+Bash
+
+```
+# Nearby restaurants within 5km radius
+curl "http://localhost:8000/api/restaurants/nearby/?lat=36.27&lng=50.00&radius=5"
+
+# Calculate OSRM route & delivery fees for Restaurant 12
+curl "http://localhost:8000/api/restaurants/12/route/?user_lat=36.2750&user_lng=50.0050"
+
+# Reverse geocode location
+curl "http://localhost:8000/api/geocoding/reverse/?lat=36.2688&lng=50.0041"
+```
+
+## Django Admin & QGIS Integration
+
+### Django Admin
 
 Visit **http://localhost:8000/admin/** and log in with your superuser credentials.
 
-- **Restaurants** — uses `GISModelAdmin`: the `location` PointField renders as a click-to-place map widget
-- **Delivery Zones** — the `area` PolygonField renders as a draw tool so you can create zone boundaries directly on the map
+- **Restaurants:** Uses `GISModelAdmin` — the `location` PointField renders as a click-to-place map widget.
+    
+- **Delivery Zones:** The `area` PolygonField renders as a draw tool so you can create zone boundaries directly on the map.
+    
+- **Pricing Config:** Manage `base_fee`, `per_km_rate`, and peak hour multipliers dynamically without code changes.
+    
 
----
+### QGIS Integration (Spatial Analysis)
+
+You can connect **QGIS** directly to the PostgreSQL/PostGIS database running inside Docker:
+
+1. Open QGIS $\rightarrow$ Browser Panel $\rightarrow$ Right-click **PostgreSQL** $\rightarrow$ **New Connection**.
+    
+2. **Host:** `localhost` | **Port:** `5432` | **Database:** `mygeodb` | **Username:** `myprojectuser` | **Password:** `mypassword`
+    
+3. Open `restaurants_restaurant` layer to view attribute tables, edit points, and perform spatial analytics.
+    
 
 ## GeoDjango Concepts Covered
 
-| Concept | Where to find it |
+|**Concept**|**Where to find it**|
 |---|---|
-| `PointField` with `geography=True` | `restaurants/models.py` |
-| `PolygonField` + `MultiPolygonField` | `zones/models.py` |
-| Radius query — `distance_lte` | `restaurants/views.py → nearby()` |
-| Distance annotation — `Distance()` | `restaurants/views.py → nearby()` |
-| Containment — `area__contains` | `zones/views.py → check()` |
-| Intersection — `area__intersects` | `zones/views.py → overlapping()` |
-| GeoJSON serialization | `restaurants/serializers.py` |
-| GDAL Shapefile import | `restaurants/management/commands/` |
-| `GISModelAdmin` map widgets | `restaurants/admin.py` |
-| Creating Point/Polygon in Python | `seed_data.py` |
-| SRID + coordinate systems | `models.py`, `seed_data.py` |
+|`PointField` with `geography=True`|`restaurants/models.py`|
+|`PolygonField` + `MultiPolygonField`|`zones/models.py`|
+|Radius query — `distance_lte`|`restaurants/views.py → nearby()`|
+|Spatial Indexing — `GISTIndex`|PostgreSQL / PostGIS DB Layer|
+|OSRM Road Network Routing|`restaurants/services.py → OSRMRoutingService`|
+|Dynamic Delivery Pricing|`restaurants/pricing_service.py`|
+|Reverse Geocoding|`restaurants/services.py → NominatimGeocodingService`|
+|Real-time Tracking (WebSockets)|`restaurants/consumers.py` & `tasks.py`|
+|Redis Spatial Caching|`restaurants/utils.py` (Geohash encoding)|
 
----
+## Common Errors & Troubleshooting
 
-## Common Errors
-
-**`GDAL_ERROR: Could not find GDAL library`** — macOS Apple Silicon:
-```python
-# Add to settings.py
-GDAL_LIBRARY_PATH = '/opt/homebrew/lib/libgdal.dylib'
-GEOS_LIBRARY_PATH = '/opt/homebrew/lib/libgeos_c.dylib'
-```
-
-**`relation does not exist`** — migrations not run:
-```bash
-python manage.py migrate
-```
-
-**`could not open extension control file "postgis.control"`** — PostGIS not installed for your PostgreSQL version:
-```bash
-# macOS
-brew install postgis
-
-# Ubuntu
-sudo apt-get install postgresql-15-postgis-3
-```
-
-**Frontend shows no restaurants** — verify data exists:
-```bash
-python manage.py shell -c "from restaurants.models import Restaurant; print(Restaurant.objects.count())"
-# Must be greater than 0
-```
-
-**Admin map shows 403 Access Blocked** — OSM blocks localhost referers. This is a known OSM tile policy restriction for local development and does not affect the frontend map.
-
----
-
+- **WebSocket Timeout Error / Courier Icon Not Moving:** Occurs when Celery worker lacks dependencies. Rebuild containers:
+    
+    Bash
+    
+    ```
+    docker compose down
+    docker compose up -d --build
+    ```
+    
+- **Nominatim 502 Bad Gateway / DNS Error:** Resolved by setting Google DNS (`8.8.8.8`) inside `docker-compose.yml`.
+    
+- **OSRM Road Route Direction Flipped:** OSRM requires origin point first (`restaurant`) and destination point second (`user`). Handled in `views.py`.
+    
 
 ## License
 
