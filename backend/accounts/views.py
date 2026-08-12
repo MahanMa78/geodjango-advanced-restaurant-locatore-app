@@ -1,10 +1,12 @@
 import random
+from rest_framework import viewsets
+from rest_framework.decorators import action
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
 from rest_framework_simplejwt.tokens import RefreshToken
-from .models import User, OTPCode
-from .serializers import SendOTPSerializer, VerifyOTPSerializer, UserProfileSerializer
+from .models import User, OTPCode , UserAddress
+from .serializers import SendOTPSerializer, VerifyOTPSerializer, UserProfileSerializer , UserAddressSerializer
 
 
 class SendOTPView(APIView):
@@ -85,3 +87,25 @@ class UserProfileView(APIView):
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class UserAddressViewSet(viewsets.ModelViewSet):
+    """Full management of saved user addresses (CRUD)"""
+    serializer_class = UserAddressSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        # The user has access only to their own addresses.
+        return UserAddress.objects.filter(user=self.request.user).order_by('-is_default', '-id')
+
+    @action(detail=True, methods=['patch'], url_path='set-default')
+    def set_default(self, request, pk=None):
+        """Set the selected address as the default address"""
+        address = self.get_object()
+        # Removing the default status from all other addresses of the user
+        UserAddress.objects.filter(user=request.user).update(is_default=False)
+        # Setting the current address as default
+        address.is_default = True
+        address.save()
+        
+        return Response({"message": "The default address has been changed successfully."}, status=status.HTTP_200_OK)
