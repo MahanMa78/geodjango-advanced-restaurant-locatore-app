@@ -14,6 +14,7 @@ SRID 4326 = WGS84 (standard GPS lat/lng coordinates)
 # ← This is the critical import. Use GIS models, not standard ones.
 from django.contrib.gis.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator
+from django.conf import settings
 
 
 class Category(models.Model):
@@ -35,6 +36,13 @@ class Restaurant(models.Model):
     2. geography=True — enables accurate spherical distance queries
     3. SRID 4326 — WGS84 coordinate system (default for GPS)
     """
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='restaurants',
+        null=True, blank=True,
+        verbose_name="مدیر رستوران"
+    )
     
     name = models.CharField(max_length=150)
     description = models.TextField(blank=True)
@@ -190,6 +198,13 @@ class PricingConfig(models.Model):
 
 class Courier(models.Model):
     "Courier / Motorcycle Delivery Rider Model"
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='courier_profile',
+        null=True, blank=True
+    )
+
     name = models.CharField(max_length=150)
     phone = models.CharField(max_length=20)
     is_available = models.BooleanField(default=True)
@@ -211,6 +226,13 @@ class Order(models.Model):
         ('CANCELLED', 'Cancelled'),
     ]
 
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='orders',
+        null=True, blank=True
+    )
+    
     restaurant = models.ForeignKey(Restaurant, on_delete=models.CASCADE, related_name='orders')
     courier = models.ForeignKey(Courier, on_delete=models.SET_NULL, null=True, blank=True, related_name='orders')
 

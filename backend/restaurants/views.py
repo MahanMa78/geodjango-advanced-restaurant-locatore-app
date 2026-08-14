@@ -16,12 +16,13 @@ from django.contrib.gis.db.models.functions import Distance
 from django.shortcuts import get_object_or_404
 
 
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status , permissions
 from rest_framework.decorators import action , api_view
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from .utils import get_spatial_cache, set_spatial_cache
-
+from django.contrib.gis.geos import Point
+from django.contrib.gis.measure import D
 from .models import Restaurant, Category, MenuItem , Order
 from .serializers import (
     RestaurantListSerializer,
@@ -34,6 +35,7 @@ from .services import OSRMRoutingService
 from .pricing_service import DynamicPricingService
 from .geocoding_service import NominatimGeocodingService
 from .tasks import simulate_courier_movement
+from .permissions import IsRestaurantOwnerOrAdmin
 
 
 class RestaurantViewSet(viewsets.ModelViewSet):
@@ -51,6 +53,7 @@ class RestaurantViewSet(viewsets.ModelViewSet):
       GET  /api/restaurants/categories/     → list all categories
     """
     queryset = Restaurant.objects.select_related('category').all()
+    permission_classes = [IsRestaurantOwnerOrAdmin]
     
     def get_serializer_class(self):
         if self.action == 'retrieve':
@@ -245,16 +248,25 @@ class RestaurantViewSet(viewsets.ModelViewSet):
 class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Category.objects.all()
     serializer_class = CategorySerializer
+    permission_classes = [permissions.AllowAny]
 
 
 class MenuItemViewSet(viewsets.ModelViewSet):
     serializer_class = MenuItemSerializer
+    permission_classes = [permissions.IsAuthenticated]
     
     def get_queryset(self):
-        return MenuItem.objects.filter(
-            restaurant_id=self.kwargs['restaurant_pk']
-        )
-        
+        restaurant_id = self.request.query_params.get('restaurant')
+        if restaurant_id:
+            return MenuItem.objects.filter(restaurant_id=restaurant_id)
+        return MenuItem.objects.all()
+
+    def perform_create(self, serializer):
+        restaurant = serializer.validated_data['restaurant']
+        # Verifying that the user is the restaurant owner
+        if restaurant.owner != self.request.user and self.request.user.role != 'ADMIN':
+            raise permissions.PermissionDenied("You do not have permission to add food to this restaurant.")
+        serializer.save()
  
 @api_view(['GET'])
 def restaurant_route(request, pk):

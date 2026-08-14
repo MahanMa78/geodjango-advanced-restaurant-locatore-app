@@ -33,7 +33,8 @@ Output format:
 
 from rest_framework import serializers
 from rest_framework_gis.serializers import GeoFeatureModelSerializer
-from .models import Restaurant, Category, MenuItem
+from django.contrib.gis.geos import Point
+from .models import Restaurant, Category, MenuItem , Courier, Order
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -45,8 +46,8 @@ class CategorySerializer(serializers.ModelSerializer):
 class MenuItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = MenuItem
-        fields = ['id', 'name', 'description', 'price', 'category', 'is_available', 'image_url']
-
+        fields = ['id', 'restaurant', 'name', 'description', 'price', 'category', 'is_available', 'image_url']
+        read_only_fields = ['id']
 
 class RestaurantListSerializer(GeoFeatureModelSerializer):
     """
@@ -84,9 +85,15 @@ class RestaurantListSerializer(GeoFeatureModelSerializer):
 
 
 class RestaurantDetailSerializer(GeoFeatureModelSerializer):
-    """Full restaurant detail including menu items"""
-    category = CategorySerializer(read_only=True)
+    """
+    Full restaurant detail including menu items.
+    A comprehensive serializer for the creation 
+    and editing of restaurant information by the owner.
+    """
+    category = CategorySerializer(source='category' ,read_only=True)
     menu_items = MenuItemSerializer(many=True, read_only=True)
+    lat = serializers.FloatField(write_only=True, required=False)
+    lng = serializers.FloatField(write_only=True, required=False)
     
     class Meta:
         model = Restaurant
@@ -98,6 +105,25 @@ class RestaurantDetailSerializer(GeoFeatureModelSerializer):
             'is_open', 'is_featured', 'image_url',
             'menu_items', 'created_at',
         ]
+        read_only_fields = ['id', 'owner', 'rating', 'created_at']
+
+
+    def create(self, validated_data):
+        lat = validated_data.pop('lat', None)
+        lng = validated_data.pop('lng', None)
+        if lat is not None and lng is not None:
+            validated_data['location'] = Point(lng, lat, srid=4326)
+        
+        # Registering the current user as the restaurant owner
+        validated_data['owner'] = self.context['request'].user
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        lat = validated_data.pop('lat', None)
+        lng = validated_data.pop('lng', None)
+        if lat is not None and lng is not None:
+            instance.location = Point(lng, lat, srid=4326)
+        return super().update(instance, validated_data)
 
 
 class RestaurantWriteSerializer(serializers.ModelSerializer):
@@ -135,3 +161,7 @@ class RestaurantWriteSerializer(serializers.ModelSerializer):
         data['location'] = Point(lng, lat, srid=4326)
         
         return data
+
+    def create(self, validated_data):
+        validated_data['owner'] = self.context['request'].user
+        return super().create(validated_data)
