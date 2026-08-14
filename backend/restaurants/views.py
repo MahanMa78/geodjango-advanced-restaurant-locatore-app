@@ -23,13 +23,14 @@ from rest_framework.views import APIView
 from .utils import get_spatial_cache, set_spatial_cache
 from django.contrib.gis.geos import Point
 from django.contrib.gis.measure import D
-from .models import Restaurant, Category, MenuItem , Order
+from .models import Restaurant, Category, MenuItem , Order , OrderItem, Courier
 from .serializers import (
     RestaurantListSerializer,
     RestaurantDetailSerializer, 
     RestaurantWriteSerializer,
     CategorySerializer,
     MenuItemSerializer,
+    OrderDetailSerializer,
 )
 from .services import OSRMRoutingService
 from .pricing_service import DynamicPricingService
@@ -406,13 +407,16 @@ class CreateOrderView(APIView):
     POST /api/orders/create/
     Placing a new order and automatically executing the courier movement simulation in Celery.
     """
+    permission_classes = [permissions.IsAuthenticated]
+
     def post(self, request):
         restaurant_id = request.data.get('restaurant_id')
         lat = request.data.get('lat')
         lng = request.data.get('lng')
         address = request.data.get('address', '')
-        total_amount = request.data.get('total_amount', 0)
-        delivery_fee = request.data.get('delivery_fee', 0)
+        # total_amount = request.data.get('total_amount', 0)
+        # delivery_fee = request.data.get('delivery_fee', 0)
+        items_data = request.data.get('items', [])
 
         if not all([restaurant_id, lat, lng]):
             return Response(
@@ -425,22 +429,76 @@ class CreateOrderView(APIView):
         except Restaurant.DoesNotExist:
             return Response({"error": "Restaurant not found."}, status=status.HTTP_404_NOT_FOUND)
 
+        route_result = OSRMRoutingService.get_route(
+            start_lng=restaurant.longitude,
+            start_lat=restaurant.latitude,
+            end_lng=float(lng),
+            end_lat=float(lat)
+        )
+        distance_km = route_result.get("distance_km", 2.0) if route_result.get("success") else 2.0
+        pricing_breakdown = DynamicPricingService.calculate_delivery_fee(distance_km)
+        delivery_fee = pricing_breakdown.get("final_fee", restaurant.delivery_fee)
+
+        courier = Courier.objects.filter(is_available=True).first()
+
         # Create New Order
         order = Order.objects.create(
+            user=request.user,
             restaurant=restaurant,
+            courier=courier,
             delivery_location=Point(float(lng), float(lat), srid=4326),
             delivery_address=address,
-            total_amount=total_amount,
+            total_amount=0,
             delivery_fee=delivery_fee,
             status='PREPARING'
         )
 
+        items_total = 0
+        order_items_to_create = []
+
+        for item in items_data:
+            menu_item_id = item.get('menu_item_id')
+            quantity = int(item.get('quantity', 1))
+            try:
+                menu_item = MenuItem.objects.get(id=menu_item_id, restaurant=restaurant)
+                item_price = menu_item.price
+                items_total += (item_price * quantity)
+                
+                order_items_to_create.append(OrderItem(
+                    order=order,
+                    menu_item=menu_item,
+                    item_name=menu_item.name,
+                    price=item_price,
+                    quantity=quantity
+                ))
+            except MenuItem.DoesNotExist:
+                continue
+
+        OrderItem.objects.bulk_create(order_items_to_create)
+
+        order.total_amount = items_total + delivery_fee
+        order.save()
+
         # Calling async Celery task to simulate the movement of the pickaxe
         simulate_courier_movement.delay(order.id)
 
-        return Response({
-            "success": True,
-            "order_id": order.id,
-            "status": order.status,
-            "message": "Order placed successfully and the courier will arrive soon."
-        }, status=status.HTTP_201_CREATED)
+        # return Response({
+        #     "success": True,
+        #     "order_id": order.id,
+        #     "status": order.status,
+        #     "message": "Order placed successfully and the courier will arrive soon."
+        # }, status=status.HTTP_201_CREATED)
+        return Response(OrderDetailSerializer(order).data, status=status.HTTP_201_CREATED)
+
+
+class UserOrdersView(APIView):
+    """
+    GET /api/orders/my-orders/
+    View the complete order and invoice history for the current user.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        orders = Order.objects.filter(user=request.user).order_by('-created_at')
+        serializer = OrderDetailSerializer(orders, many=True)
+        return Response(serializer.data)

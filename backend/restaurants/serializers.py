@@ -34,7 +34,7 @@ Output format:
 from rest_framework import serializers
 from rest_framework_gis.serializers import GeoFeatureModelSerializer
 from django.contrib.gis.geos import Point
-from .models import Restaurant, Category, MenuItem , Courier, Order
+from .models import OrderItem, Restaurant, Category, MenuItem , Courier, Order
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -165,3 +165,29 @@ class RestaurantWriteSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data['owner'] = self.context['request'].user
         return super().create(validated_data)
+
+
+class OrderItemSerializer(serializers.ModelSerializer):
+    total_price = serializers.DecimalField(max_digits=12, decimal_places=0, read_only=True)
+
+    class Meta:
+        model = OrderItem
+        fields = ['id', 'menu_item', 'item_name', 'price', 'quantity', 'total_price']
+
+
+class OrderDetailSerializer(serializers.ModelSerializer):
+    """Serializer for displaying the complete order invoice"""
+    items = OrderItemSerializer(many=True, read_only=True)
+    restaurant_name = serializers.CharField(source='restaurant.name', read_only=True)
+    courier_name = serializers.CharField(source='courier.name', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+    class Meta:
+        model = Order
+        fields = [
+            'id', 'user', 'restaurant', 'restaurant_name',
+            'courier', 'courier_name', 'status', 'status_display',
+            'delivery_address', 'delivery_fee', 'total_amount',
+            'items', 'created_at'
+        ]
+        read_only_fields = ['id', 'user', 'status', 'created_at']

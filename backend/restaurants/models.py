@@ -249,3 +249,19 @@ class Order(models.Model):
 
     def __str__(self):
         return f"Order #{self.id} - {self.restaurant.name} ({self.get_status_display()})"
+
+
+class OrderItem(models.Model):
+    """Items purchased in each order (itemized invoice)"""
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='items')
+    menu_item = models.ForeignKey(MenuItem, on_delete=models.SET_NULL, null=True)
+    item_name = models.CharField(max_length=150, help_text="Name of the item at the time of purchase")
+    price = models.DecimalField(max_digits=12, decimal_places=0, help_text="Unit price at the time of purchase")
+    quantity = models.PositiveIntegerField(default=1, help_text="Quantity ordered")
+
+    @property
+    def total_price(self):
+        return self.price * self.quantity
+
+    def __str__(self):
+        return f"{self.quantity}x {self.item_name} (Order #{self.order.id})"

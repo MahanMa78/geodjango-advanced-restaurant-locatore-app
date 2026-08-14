@@ -8,4 +8,9 @@ Libraries:
 7. cors headers
 8. Pillow
 9. Psycopg2-binary
-1. Python dotenv
+10. Python dotenv
+
+Implementations:
+1.Docker
+2.redis
+3.celery
