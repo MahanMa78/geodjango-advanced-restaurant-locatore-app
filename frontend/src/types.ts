@@ -209,3 +209,61 @@ export interface ReverseGeocodeResponse {
   road: string;
   error?: string;
 }
+
+export interface User {
+  id: number;
+  phone_number: string;
+  first_name?: string;
+  last_name?: string;
+  role: 'CUSTOMER' | 'RESTAURANT_OWNER' | 'COURIER' | 'ADMIN';
+}
+
+export interface AuthTokens {
+  access: string;
+  refresh: string;
+}
+
+export interface UserAddress {
+  id: number;
+  title: string;
+  address_text: string;
+  location_details?: {
+    lat: number;
+    lng: number;
+  };
+  is_default: boolean;
+}
+
+export interface CartItem {
+  menu_item_id: number;
+  name: string;
+  price: number;
+  quantity: number;
+}
+
+export interface OrderCreatePayload {
+  restaurant_id: number;
+  lat: number;
+  lng: number;
+  address: string;
+  items: { menu_item_id: number; quantity: number }[];
+}
+
+export interface OrderResponse {
+  id: number;
+  restaurant_name: string;
+  courier_name?: string;
+  status: string;
+  status_display: string;
+  delivery_address: string;
+  delivery_fee: number;
+  total_amount: number;
+  items: {
+    id: number;
+    item_name: string;
+    price: number;
+    quantity: number;
+    total_price: number;
+  }[];
+  created_at: string;
+}

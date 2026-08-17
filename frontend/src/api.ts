@@ -23,12 +23,28 @@ import type {
   GeoJSONFeature,
   NearbyParams,
   BboxParams,
+  RouteResponse,
+  ReverseGeocodeResponse,
+  AuthTokens,
+  User,
+  UserAddress,
+  OrderCreatePayload,
+  OrderResponse,
 } from './types';
-import type { ReverseGeocodeResponse } from './types';
 
 const api = axios.create({
-  baseURL: 'http://localhost:8000/api',
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000/api',
   headers: { 'Content-Type': 'application/json' },
+});
+
+// ─── JWT Interceptor ─────────────────────────────────────────────────────────
+
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('access_token');
+  if (token && config.headers) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
 });
 
 // ─── GeoJSON parsers ──────────────────────────────────────────────────────────
@@ -66,6 +82,44 @@ function parseZoneCollection(geojson: GeoJSONFeatureCollection): DeliveryZone[] 
     ...(feature.properties as Omit<DeliveryZone, 'id' | 'geometry'>),
     geometry: feature.geometry,
   })) as DeliveryZone[];
+}
+
+// ─── Authentication endpoints ────────────────────────────────────────────────
+
+export async function sendOtpApi(phoneNumber: string): Promise<{ message: string; dev_code?: string }> {
+  const res = await api.post('/accounts/send-otp/', { phone_number: phoneNumber });
+  return res.data;
+}
+
+export async function verifyOtpApi(
+  phoneNumber: string,
+  code: string
+): Promise<{ message: string; is_new_user: boolean; tokens: AuthTokens; user: User }> {
+  const res = await api.post('/accounts/verify-otp/', { phone_number: phoneNumber, code });
+  return res.data;
+}
+
+export async function fetchUserProfile(): Promise<User> {
+  const res = await api.get<User>('/accounts/profile/');
+  return res.data;
+}
+
+// ─── User Address endpoints ──────────────────────────────────────────────────
+
+export async function fetchUserAddresses(): Promise<UserAddress[]> {
+  const res = await api.get<UserAddress[] | { results: UserAddress[] }>('/accounts/addresses/');
+  const data = res.data;
+  return Array.isArray(data) ? data : (data as { results: UserAddress[] }).results ?? [];
+}
+
+export async function saveUserAddress(payload: {
+  title: string;
+  address_text: string;
+  lat: number;
+  lng: number;
+}): Promise<UserAddress> {
+  const res = await api.post<UserAddress>('/accounts/addresses/', payload);
+  return res.data;
 }
 
 // ─── Restaurant endpoints ─────────────────────────────────────────────────────
@@ -134,18 +188,7 @@ export async function fetchInBbox({
   return parseRestaurantCollection(res.data);
 }
 
-// ─── Routing interfaces & endpoint ───────────────────────────────────────────
-
-export interface RouteResponse {
-  restaurant_id: number;
-  restaurant_name: string;
-  distance_km: number;
-  duration_minutes: number;
-  route_geometry: {
-    type: 'LineString';
-    coordinates: [number, number][]; // [longitude, latitude]
-  };
-}
+// ─── Routing & Geocoding endpoints ───────────────────────────────────────────
 
 /**
  * GET /api/restaurants/:id/route/?user_lat=&user_lng=
@@ -158,6 +201,13 @@ export async function fetchRoute(
 ): Promise<RouteResponse> {
   const res = await api.get<RouteResponse>(`/restaurants/${restaurantId}/route/`, {
     params: { user_lat: userLat, user_lng: userLng },
+  });
+  return res.data;
+}
+
+export async function fetchReverseGeocode(lat: number, lng: number): Promise<ReverseGeocodeResponse> {
+  const res = await api.get<ReverseGeocodeResponse>('/geocoding/reverse/', {
+    params: { lat, lng },
   });
   return res.data;
 }
@@ -212,32 +262,16 @@ export async function checkZone({
   };
 }
 
+// ─── Order & Dispatch endpoints ──────────────────────────────────────────────
+
+export async function createOrder(payload: OrderCreatePayload): Promise<OrderResponse> {
+  const res = await api.post<OrderResponse>('/orders/create/', payload);
+  return res.data;
+}
+
+export async function fetchMyOrders(): Promise<OrderResponse[]> {
+  const res = await api.get<OrderResponse[]>('/orders/my-orders/');
+  return res.data;
+}
+
 export default api;
-
-export async function fetchReverseGeocode(lat: number, lng: number): Promise<ReverseGeocodeResponse> {
-  const res = await api.get<ReverseGeocodeResponse>('/geocoding/reverse/', {
-    params: { lat, lng },
-  });
-  return res.data;
-}
-
-export interface CreateOrderPayload {
-  restaurant_id: number;
-  lat: number;
-  lng: number;
-  address: string;
-  total_amount: number;
-  delivery_fee: number;
-}
-
-export interface CreateOrderResponse {
-  success: boolean;
-  order_id: number;
-  status: string;
-  message: string;
-}
-
-export async function createOrder(payload: CreateOrderPayload): Promise<CreateOrderResponse> {
-  const res = await api.post<CreateOrderResponse>('/orders/create/', payload);
-  return res.data;
-}

@@ -60,8 +60,8 @@ class RestaurantListSerializer(GeoFeatureModelSerializer):
     Leaflet.js will read this GeoJSON and automatically place
     a marker at the coordinates.
     """
-    category_name = serializers.CharField(source='category.name', read_only=True)
-    category_icon = serializers.CharField(source='category.icon', read_only=True)
+    category_name = serializers.SerializerMethodField()
+    category_icon = serializers.SerializerMethodField()
     distance_km = serializers.SerializerMethodField()
     
     class Meta:
@@ -73,6 +73,12 @@ class RestaurantListSerializer(GeoFeatureModelSerializer):
             'is_open', 'is_featured', 'image_url',
             'category_name', 'category_icon', 'distance_km',
         ]
+
+    def get_category_name(self, obj):
+        return obj.category.name if obj.category else None
+
+    def get_category_icon(self, obj):
+        return obj.category.icon if obj.category else '🍽️'
     
     def get_distance_km(self, obj):
         """
