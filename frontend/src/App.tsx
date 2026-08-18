@@ -94,7 +94,9 @@ export default function App() {
       </header>
 
       <div className="flex flex-1 overflow-hidden">
-        {activeTab === 'map' && <MapView />}
+        {activeTab === 'map' && (
+          <MapView onRequireAuth={() => setIsAuthModalOpen(true)} />
+        )}
         {activeTab === 'concepts' && <ConceptsView />}
       </div>
 

@@ -96,10 +96,8 @@ class RestaurantDetailSerializer(GeoFeatureModelSerializer):
     A comprehensive serializer for the creation 
     and editing of restaurant information by the owner.
     """
-    category = CategorySerializer(source='category' ,read_only=True)
+    category = CategorySerializer(read_only=True)
     menu_items = MenuItemSerializer(many=True, read_only=True)
-    lat = serializers.FloatField(write_only=True, required=False)
-    lng = serializers.FloatField(write_only=True, required=False)
     
     class Meta:
         model = Restaurant

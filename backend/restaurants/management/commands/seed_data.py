@@ -25,12 +25,13 @@ GEODJANGO CONCEPTS DEMONSTRATED:
   3. Building a MultiPolygon ServiceArea using Convex Hull geometry
   4. Idempotent seeding (safe to re-run without creating duplicate data)
 """   
-
 from django.core.management.base import BaseCommand, CommandError
 from django.contrib.gis.geos import MultiPoint, MultiPolygon, Polygon
-from restaurants.models import Restaurant, MenuItem
+from django.contrib.auth import get_user_model
+from restaurants.models import Restaurant, MenuItem, Category
 from zones.models import DeliveryZone, ServiceArea
 
+User = get_user_model()
 """
 Web Mercator — good enough for short-distance buffering in meters.
 (Not accurate for polar regions or very large areas, but fine for
@@ -46,43 +47,49 @@ tags in the future.
 """
 MENU_TEMPLATES = {
     "Pizza": [
-        ("Margherita Pizza", 450000, "Main", "Classic tomato, mozzarella and basil."),
-        ("Pepperoni Pizza", 520000, "Main", "Loaded with pepperoni and extra cheese."),
-        ("Garlic Bread", 150000, "Side", "Toasted with garlic butter."),
-        ("Soft Drink", 80000, "Drinks", "Chilled can."),
+        ("Special Pepperoni Pizza", 320000, "Pizza", "Artisanal pepperoni, mozzarella cheese, special tomato sauce"),
+        ("Italian Margherita Pizza", 240000, "Pizza", "Fresh tomato sauce, fresh basil, mozzarella cheese"),
+        ("Garlic Bread", 95000, "Starter", "Crispy bread with garlic butter, herbs, and melted cheese"),
+        ("Loaded French Fries", 110000, "Starter", "Golden crispy fries with house seasoning and dipping sauce"),
+        ("Soft Drink Can", 30000, "Drinks", "Chilled soda can (Coca-Cola / Fanta)"),
     ],
     "Iranian": [
-        ("Chelo Kabab Koobideh", 350000, "Main", "Two skewers of minced beef, saffron rice, and grilled tomato."),
-        ("Ghormeh Sabzi", 280000, "Main", "Traditional Persian herb stew with lamb, kidney beans, and dried lime."),
-        ("Zereshk Polo ba Morgh", 290000, "Main", "Saffron rice with barberries served with tender chicken."),
-        ("Kashk-e Bademjan", 150000, "Starter", "Sautéed eggplant with kashk, caramelized onions, and mint."),
-        ("Doogh", 35000, "Drinks", "Traditional chilled mint yogurt drink."),
+        ("Chelo Kabab Koobideh", 280000, "Main", "Two skewers of saffron minced beef kebab with Persian rice and grilled tomato"),
+        ("Chelo Joojeh Kabab", 260000, "Main", "Tender marinated chicken breast skewers with saffron steamed rice"),
+        ("Ghormeh Sabzi Stew", 210000, "Main", "Slow-cooked herb stew with lamb, kidney beans, and dried lime"),
+        ("Kashk-e Bademjan", 120000, "Starter", "Smoked sautéed eggplant with whey, caramelized onions, and mint"),
+        ("Traditional Mint Doogh", 25000, "Drinks", "Refreshing Persian chilled yogurt drink with mint"),
     ],
-    "Italian": [
-        ("Pizza Margherita", 280000, "Main", "Classic Neapolitan pizza with tomato sauce, mozzarella, and fresh basil."),
-        ("Penne Carbonara", 310000, "Main", "Pasta with egg yolk, guanciale, pecorino cheese, and black pepper."),
-        ("Lasagna Bolognese", 330000, "Main", "Layered pasta with rich meat ragù, béchamel, and parmesan."),
-        ("Bruschetta al Pomodoro", 140000, "Starter", "Grilled garlic bread topped with fresh tomatoes, basil, and olive oil."),
-        ("Tiramisu", 120000, "Dessert", "Classic Italian coffee-flavored dessert."),
+    "Cafe": [
+        ("Double Espresso", 65000, "Hot Drinks", "100% Arabica fresh double shot"),
+        ("Caramel Cappuccino", 85000, "Hot Drinks", "Espresso with steamed velvety milk foam and caramel drizzle"),
+        ("Nutella Chocolate Shake", 110000, "Cold Drinks", "Rich chocolate ice cream blended with authentic Nutella and cream"),
+        ("New York Cheesecake", 95000, "Dessert", "Classic dense and creamy baked cheesecake with vanilla crust"),
+        ("Iced Americano", 75000, "Cold Drinks", "Fresh espresso shots poured over chilled water and ice"),
     ],
-    # Default template — used for the generic "Restaurant"/"Fast Food"/
-    # "Cafe" categories that import_restaurants_online currently assigns.
+    "Fast Food": [
+        ("Classic Double Cheeseburger", 290000, "Burgers", "Two pure beef patties, cheddar cheese, pickles, and special sauce"),
+        ("Crispy Chicken Strips (3 pcs)", 230000, "Fried Chicken", "Tender crispy fried chicken fillets served with garlic dipping sauce"),
+        ("Crispy Fried Mushrooms", 110000, "Starter", "Golden battered and seasoned button mushrooms"),
+        ("Fountain Soft Drink", 25000, "Drinks", "Ice-cold fountain beverage"),
+    ],
     "__default__": [
-        ("Chef's Special Combo", 550000, "Main", "House specialty, chef's choice."),
-        ("Grilled Chicken Plate", 420000, "Main", "Served with rice and salad."),
-        ("Fries", 120000, "Side", "Crispy golden fries."),
-        ("Soft Drink", 80000, "Drinks", "Chilled can."),
+        ("Chef's Daily Special", 290000, "Main", "Chef's signature combination plate with saffron rice and sides"),
+        ("Persian Roast Chicken with Rice", 220000, "Main", "Slow-roasted chicken leg in spiced tomato sauce served with barberry rice"),
+        ("Fresh Garden Salad", 45000, "Salad", "Crisp lettuce, cucumber, tomatoes, carrots with dressing"),
+        ("Shallot Yogurt Dip (Mast-o-Musir)", 35000, "Starter", "Thick strained yogurt blended with wild Persian shallots"),
+        ("Soft Drink Can", 30000, "Drinks", "Chilled carbonated soft drink"),
     ],
 }
- 
- 
+
+
 class Command(BaseCommand):
     help = (
         "Seeds delivery zones, a service area, and sample menu items for "
         "restaurants already imported by import_restaurants_online. City-agnostic: "
         "derives every coordinate from the restaurants actually in the DB."
     )
- 
+
     def add_arguments(self, parser):
         parser.add_argument(
             "--city",
@@ -101,53 +108,42 @@ class Command(BaseCommand):
             help="Delivery zone radius, in kilometers, around each restaurant (default: 1.5).",
         )
         parser.add_argument(
-            "--limit",
-            type=int,
-            default=None,
-            help="Optional cap on how many restaurants to seed (default: all matching restaurants).",
-        )
-        parser.add_argument(
             "--reseed",
             action="store_true",
             help="Delete and recreate zones/menus for the selected restaurants instead of skipping ones that already have data.",
         )
- 
     def handle(self, *args, **options):
         city = options["city"]
         radius_km = options["radius_km"]
-        limit = options["limit"]
         reseed = options["reseed"]
- 
+
         restaurants = Restaurant.objects.select_related("category").all()
         if city:
             restaurants = restaurants.filter(address__icontains=city)
-        if limit:
-            restaurants = restaurants[:limit]
- 
+
         if not restaurants.exists():
-            raise CommandError(
-                "No matching restaurants found. Run `import_restaurants_online` "
-                "first" + (f" for city '{city}'." if city else ".")
-            )
- 
+            raise CommandError("No matching restaurants found in database.")
+
+        # Find default administrator to assign restaurants to (allows dashboard editing)
+        default_admin = User.objects.filter(is_superuser=True).first() or User.objects.filter(role="ADMIN").first()
+
         restaurants = list(restaurants)
         label = city or f"{len(restaurants)} restaurant(s) in the database"
         self.stdout.write(f"🌍 Seeding derived data for {label}...\n")
- 
+
         if reseed:
             self._clear_existing(restaurants)
- 
+
         zones_created = self._seed_delivery_zones(restaurants, radius_km)
         self._seed_service_area(restaurants, city)
-        menus_created = self._seed_menu_items(restaurants)
- 
+        menus_created = self._seed_menu_items(restaurants, default_admin)
+
         self.stdout.write(f"\n{'=' * 50}")
-        self.stdout.write(self.style.SUCCESS("✅ Done"))
+        self.stdout.write(self.style.SUCCESS("✅ Seeding completed successfully!"))
         self.stdout.write(f"{'=' * 50}")
-        self.stdout.write(f"  • {zones_created} delivery zone(s) created")
-        self.stdout.write(f"  • {menus_created} restaurant(s) received menu items")
-        self.stdout.write(f"  • {ServiceArea.objects.count()} service area(s) in total")
- 
+        self.stdout.write(f"  • {zones_created} delivery zone(s) created.")
+        self.stdout.write(f"  • {menus_created} restaurant(s) received menu items.")
+
     # ------------------------------------------------------------------
     # Delivery zones
     # ------------------------------------------------------------------
@@ -166,9 +162,8 @@ class Command(BaseCommand):
             # check simply guards default (non-reseed) runs against duplicates.
             if DeliveryZone.objects.filter(restaurant=restaurant).exists():
                 continue
- 
+
             zone_polygon = self._buffer_point_km(restaurant.location, radius_km)
- 
             DeliveryZone.objects.update_or_create(
                 restaurant=restaurant,
                 defaults=dict(
@@ -183,10 +178,10 @@ class Command(BaseCommand):
                 ),
             )
             created += 1
- 
+
         self.stdout.write(f"✅ Created/updated {created} delivery zone(s) (radius ≈ {radius_km} km)")
         return created
- 
+
     def _buffer_point_km(self, point, radius_km) -> Polygon:
         """Buffer a Point by `radius_km` kilometers using a metric CRS, returning a Polygon in SRID 4326."""
         metric_point = point.clone()
@@ -195,7 +190,7 @@ class Command(BaseCommand):
         buffered.srid = METRIC_SRID
         buffered.transform(GEOGRAPHIC_SRID)
         return buffered
- 
+
     # ------------------------------------------------------------------
     # Service area
     # ------------------------------------------------------------------
@@ -206,21 +201,19 @@ class Command(BaseCommand):
         mainland/island polygons for one specific city. Works for any bbox.
         """
         points = MultiPoint([r.location for r in restaurants if r.location], srid=GEOGRAPHIC_SRID)
- 
         hull = points.convex_hull
         # convex_hull of <3 points can degrade to a Point or LineString;
         # buffer it in metric space so we always end up with a Polygon.
         metric_hull = hull.clone()
         metric_hull.srid = GEOGRAPHIC_SRID
         metric_hull.transform(METRIC_SRID)
-        margin_m = 500  # small buffer so the boundary comfortably contains every point
-        boundary_metric = metric_hull.buffer(margin_m)
+        boundary_metric = metric_hull.buffer(500) # small buffer so the boundary comfortably contains every point
         boundary_metric.srid = METRIC_SRID
         boundary_metric.transform(GEOGRAPHIC_SRID)
- 
+
         boundary = MultiPolygon([boundary_metric], srid=GEOGRAPHIC_SRID)
-        name = f"{city} Service Area" if city else "Service Area"
- 
+        name = f"{city} Service Area" if city else "Main Service Area"
+
         ServiceArea.objects.update_or_create(
             name=name,
             defaults=dict(boundary=boundary, is_active=True),
@@ -230,7 +223,7 @@ class Command(BaseCommand):
     # ------------------------------------------------------------------
     # Menu items
     # ------------------------------------------------------------------
-    def _seed_menu_items(self, restaurants):
+    def _seed_menu_items(self, restaurants, default_admin):
         """
         Adds a small sample menu to any restaurant that doesn't already have
         one. Template is picked by Category.name, falling back to a generic
@@ -240,32 +233,48 @@ class Command(BaseCommand):
         """
         seeded = 0
         for restaurant in restaurants:
+            # Assign default owner if unassigned (enables edit/management permissions)
+            if not restaurant.owner and default_admin:
+                restaurant.owner = default_admin
+                restaurant.save()
+
             if MenuItem.objects.filter(restaurant=restaurant).exists():
                 continue  # idempotent: don't duplicate menus on re-run
- 
-            category_name = restaurant.category.name if restaurant.category else None
-            template = MENU_TEMPLATES.get(category_name, MENU_TEMPLATES["__default__"])
- 
+
+            # Smart template detection based on restaurant name or category
+            name_lower = restaurant.name.lower()
+            cat_name = restaurant.category.name if restaurant.category else ""
+
+            if any(k in name_lower or k in cat_name.lower() for k in ["کافه", "cafe", "قهوه", "coffee"]):
+                template = MENU_TEMPLATES["Cafe"]
+            elif any(k in name_lower or k in cat_name.lower() for k in ["پیتزا", "pizza", "ایتالیایی", "italian"]):
+                template = MENU_TEMPLATES["Pizza"]
+            elif any(k in name_lower or k in cat_name.lower() for k in ["برگر", "burger", "ساندویچ", "sandwich", "فست", "fast"]):
+                template = MENU_TEMPLATES["Fast Food"]
+            elif any(k in name_lower or k in cat_name.lower() for k in ["کباب", "kabab", "سنتی", "ایرانی", "iranian", "چلو"]):
+                template = MENU_TEMPLATES["Iranian"]
+            else:
+                template = MENU_TEMPLATES.get(cat_name, MENU_TEMPLATES["__default__"])
+
             MenuItem.objects.bulk_create(
                 [
                     MenuItem(
                         restaurant=restaurant,
-                        name=name,
+                        name=item_name,
                         price=price,
                         category=item_category,
-                        description=description,
+                        description=desc,
+                        is_available=True,
                     )
-                    for name, price, item_category, description in template
+                    for item_name, price, item_category, desc in template
                 ]
             )
             seeded += 1
- 
         self.stdout.write(f"✅ Seeded menu items for {seeded} restaurant(s)")
         return seeded
- 
-    # ------------------------------------------------------------------
+
     def _clear_existing(self, restaurants):
         """Used with --reseed to force a clean rebuild for the selected restaurants only."""
         DeliveryZone.objects.filter(restaurant__in=restaurants).delete()
         MenuItem.objects.filter(restaurant__in=restaurants).delete()
-        self.stdout.write("🧹 Cleared existing zones/menus for selected restaurants (--reseed)")
+        self.stdout.write("🧹 Cleared existing delivery zones and menus for selected restaurants (--reseed)")

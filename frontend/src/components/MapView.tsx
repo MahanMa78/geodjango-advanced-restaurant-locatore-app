@@ -83,7 +83,11 @@ const activeZoneStyle = (): PathOptions => ({ fillColor: '#2563EB', fillOpacity:
 
 // ── MapView ────────────────────────────────────────────────
 
-export default function MapView(): ReactNode {
+interface MapViewProps {
+  onRequireAuth?: () => void;
+}
+
+export default function MapView({ onRequireAuth }: MapViewProps): ReactNode {
   const wsRef = useRef<WebSocket | null>(null);
   const [userLocation, setUserLocation]        = useState<LatLng>(DEFAULT_CENTER);
   const [userAddress, setUserAddress]          = useState<string>('Retrieving address...');
@@ -494,6 +498,7 @@ export default function MapView(): ReactNode {
             userLocation={userLocation}
             userAddress={userAddress}
             onOrderCreated={(orderId) => setActiveOrderId(orderId)}
+            onRequireAuth={onRequireAuth}
             onClose={() => { setSelected(null); setDetail(null); }}
           />
         )}

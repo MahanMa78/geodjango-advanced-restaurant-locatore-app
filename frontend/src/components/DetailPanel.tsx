@@ -9,6 +9,7 @@ interface ExtendedDetailPanelProps extends DetailPanelProps {
   userLocation?: { lat: number; lng: number } | null;
   userAddress?: string;
   onOrderCreated?: (orderId: number) => void;
+  onRequireAuth?: () => void;
 }
 
 export default function DetailPanel({ 
@@ -17,34 +18,91 @@ export default function DetailPanel({
   routeData,
   userLocation, 
   userAddress, 
-  onOrderCreated 
+  onOrderCreated,
+  onRequireAuth
 }: ExtendedDetailPanelProps) {
   const [loading, setLoading] = useState(false);
+  // مدیریت سبد خرید به صورت { [menu_item_id]: quantity }
+  const [cart, setCart] = useState<Record<number, number>>({});
+
+  const handleAddToCart = (itemId: number) => {
+    setCart((prev) => ({ ...prev, [itemId]: (prev[itemId] || 0) + 1 }));
+  };
+
+  const handleRemoveFromCart = (itemId: number) => {
+    setCart((prev) => {
+      const updated = { ...prev };
+      if (updated[itemId] > 1) {
+        updated[itemId] -= 1;
+      } else {
+        delete updated[itemId];
+      }
+      return updated;
+    });
+  };
+
+  // محاسبه مجموع قیمت اقلام انتخاب شده در سبد خرید
+  const itemsTotal = Object.entries(cart).reduce((sum, [itemId, qty]) => {
+    const item = restaurant.menu_items?.find((i) => i.id === Number(itemId));
+    return sum + (item ? Number(item.price) * qty : 0);
+  }, 0);
+
+  const deliveryFeeNum = routeData?.pricing?.final_fee || Number(restaurant.delivery_fee) || 15000;
+  const totalPayable = itemsTotal > 0 ? itemsTotal + deliveryFeeNum : 0;
+  const totalCartCount = Object.values(cart).reduce((a, b) => a + b, 0);
 
   const handleOrder = async () => {
+    // ۱. بررسی وضعیت لاگین
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+      if (onRequireAuth) {
+        onRequireAuth();
+      } else {
+        alert('لطفاً ابتدا وارد حساب کاربری خود شوید.');
+      }
+      return;
+    }
+
+    // ۲. بررسی موقعیت مکانی
     if (!userLocation?.lat || !userLocation?.lng) {
       alert('لطفاً موقعیت خود را روی نقشه انتخاب کنید.');
       return;
     }
 
+    // ۳. بررسی خالی نبودن سبد خرید
+    if (totalCartCount === 0) {
+      alert('لطفاً حداقل یک غذا به سبد خرید اضافه کنید.');
+      return;
+    }
+
+    // ۴. بررسی حداقل مبلغ سفارش
+    if (itemsTotal < Number(restaurant.minimum_order)) {
+      alert(`حداقل مبلغ سفارش از این رستوران ${Number(restaurant.minimum_order).toLocaleString()} تومان است.`);
+      return;
+    }
+
     setLoading(true);
     try {
+      const payloadItems = Object.entries(cart).map(([menu_item_id, quantity]) => ({
+        menu_item_id: Number(menu_item_id),
+        quantity,
+      }));
+
       const response = await createOrder({
         restaurant_id: restaurant.id,
         lat: userLocation.lat,
         lng: userLocation.lng,
         address: userAddress || '',
-        total_amount: 100000,
-        delivery_fee: routeData?.pricing?.final_fee || Number(restaurant.delivery_fee) || 15000,
+        items: payloadItems,
       });
 
-      if (response.success && onOrderCreated) {
-        onOrderCreated(response.order_id);
-        onClose(); // 🚀 بسته شدن پنل جهت جلوگیری از کرش UI و تداخل State
+      if (response && onOrderCreated) {
+        onOrderCreated(response.id);
+        onClose();
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to create order:', err);
-      alert('خطا در ثبت سفارش. لطفاً دوباره تلاش کنید.');
+      alert(err.response?.data?.error || 'خطا در ثبت سفارش. لطفاً دوباره تلاش کنید.');
     } finally {
       setLoading(false);
     }
@@ -72,7 +130,7 @@ export default function DetailPanel({
   return (
     <div className="absolute inset-0 z-[1000] flex flex-col justify-end pointer-events-none">
       <div
-        className="bg-white rounded-t-2xl shadow-lift pointer-events-auto max-h-[62vh] flex flex-col animate-slide-up"
+        className="bg-white rounded-t-2xl shadow-lift pointer-events-auto max-h-[70vh] flex flex-col animate-slide-up"
         style={{ borderTop: '1px solid #ECEAE4' }}
       >
         <div className="flex justify-center pt-3 pb-1 cursor-pointer shrink-0" onClick={onClose}>
@@ -148,7 +206,7 @@ export default function DetailPanel({
           {Object.keys(menuByCategory).length > 0 ? (
             <>
               <h3 className="font-bold text-sm text-ink mb-3" style={{ fontFamily: 'Syne, sans-serif' }}>
-                Menu
+                Menu & Items
               </h3>
               <div className="flex flex-col gap-4">
                 {Object.entries(menuByCategory).map(([cat, items]) => (
@@ -156,25 +214,51 @@ export default function DetailPanel({
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-ink-faint mb-2">
                       {cat}
                     </p>
-                    <div className="flex flex-col gap-1.5">
-                      {items.map((item) => (
-                        <div
-                          key={item.id}
-                          className="flex justify-between items-start gap-3 bg-surface rounded-xl px-3 py-2.5 border border-edge"
-                        >
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium text-ink leading-snug">{item.name}</p>
-                            {item.description && (
-                              <p className="text-xs text-ink-faint mt-0.5 leading-snug line-clamp-2">
-                                {item.description}
+                    <div className="flex flex-col gap-2">
+                      {items.map((item) => {
+                        const qty = cart[item.id] || 0;
+                        return (
+                          <div
+                            key={item.id}
+                            className="flex justify-between items-center gap-3 bg-surface rounded-xl p-3 border border-edge"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium text-ink leading-snug">{item.name}</p>
+                              {item.description && (
+                                <p className="text-xs text-ink-faint mt-0.5 leading-snug line-clamp-2">
+                                  {item.description}
+                                </p>
+                              )}
+                              <p className="text-xs font-bold text-brand mt-1" style={{ fontFamily: 'Syne, sans-serif' }}>
+                                {Number(item.price).toLocaleString()} تومان
                               </p>
-                            )}
+                            </div>
+
+                            {/* کنترلر تعداد غذا */}
+                            <div className="flex items-center gap-2 bg-white rounded-lg border border-edge p-1 shrink-0">
+                              {qty > 0 ? (
+                                <>
+                                  <button
+                                    onClick={() => handleRemoveFromCart(item.id)}
+                                    className="w-6 h-6 rounded bg-red-50 text-red-600 font-bold flex items-center justify-center border-0 cursor-pointer hover:bg-red-100"
+                                  >
+                                    -
+                                  </button>
+                                  <span className="text-xs font-bold text-ink w-4 text-center">
+                                    {qty}
+                                  </span>
+                                </>
+                              ) : null}
+                              <button
+                                onClick={() => handleAddToCart(item.id)}
+                                className="w-6 h-6 rounded bg-emerald-50 text-emerald-600 font-bold flex items-center justify-center border-0 cursor-pointer hover:bg-emerald-100"
+                              >
+                                +
+                              </button>
+                            </div>
                           </div>
-                          <p className="text-sm font-bold text-brand shrink-0" style={{ fontFamily: 'Syne, sans-serif' }}>
-                            {Number(item.price).toLocaleString()} تومان
-                          </p>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 ))}
@@ -184,12 +268,30 @@ export default function DetailPanel({
             <p className="text-xs text-ink-faint text-center py-4">No menu items available</p>
           )}
 
+          {/* خلاصه فاکتور و دکمه پرداخت */}
+          {totalCartCount > 0 && (
+            <div className="mt-5 p-3.5 bg-surface rounded-xl border border-edge flex flex-col gap-2">
+              <div className="flex justify-between text-xs text-ink-muted">
+                <span>مجموع اقلام ({totalCartCount} عدد):</span>
+                <span>{itemsTotal.toLocaleString()} تومان</span>
+              </div>
+              <div className="flex justify-between text-xs text-ink-muted">
+                <span>هزینه ارسال داینامیک:</span>
+                <span>{deliveryFeeNum.toLocaleString()} تومان</span>
+              </div>
+              <div className="border-t border-edge pt-2 flex justify-between text-sm font-bold text-ink">
+                <span>مبلغ نهایی قابل پرداخت:</span>
+                <span className="text-brand">{totalPayable.toLocaleString()} تومان</span>
+              </div>
+            </div>
+          )}
+
           <button
             onClick={handleOrder}
-            disabled={loading}
-            className="w-full mt-5 h-11 rounded-xl bg-brand text-white font-semibold text-sm hover:opacity-90 active:scale-[0.98] transition-all cursor-pointer border-0 disabled:opacity-50"
+            disabled={loading || totalCartCount === 0}
+            className="w-full mt-4 h-11 rounded-xl bg-brand text-white font-semibold text-sm hover:opacity-90 active:scale-[0.98] transition-all cursor-pointer border-0 disabled:opacity-50"
           >
-            {loading ? 'در حال ثبت سفارش...' : 'Order Now 🛵'}
+            {loading ? 'در حال ثبت سفارش...' : totalCartCount > 0 ? `ثبت سفارش (${totalPayable.toLocaleString()} تومان) 🛵` : 'انتخاب غذا از منو'}
           </button>
         </div>
       </div>
